@@ -1169,6 +1169,27 @@ kbd.key {
   font-weight: 600;
 }
 
+/* A section that holds tasks folds like its project block: the caret
+   and (when folded) a count ride alongside the name. Only as wide as
+   its contents so the click target hugs the label, not the whole row.
+   The negative inset pulls the caret back so the name still lines up
+   with the indent of the cards (and of empty, non-folding sections). */
+.section-subhead.foldable {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  cursor: pointer;
+  border-radius: 5px;
+  padding: 1px 5px;
+  margin-left: 2px;
+}
+
+.section-subhead.foldable:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 /* Margin, not padding: the whole list container shifts under its
    project header — padding would inset the rows (and their accent
    edges) inside the container's own border. */

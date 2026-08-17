@@ -3,6 +3,7 @@ import { AnimatePresence } from 'framer-motion'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import type { Item, Project, Section } from '@shared/types'
 import { useData, useLiveQuery, useMutate } from '../state/data'
+import { useFolds } from '../state/folds'
 import { ItemCard } from './ItemCard'
 import { DraggableCard, DropZone, SortableCard, usePendingOrder } from './dnd'
 import { CheckableInput, ProjectDot } from './bits'
@@ -68,46 +69,38 @@ export function TaskGroups({
       else next.add(key)
       return next
     })
-  // A busy project can fold away so the rest of the day is scannable.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  // A busy project (or a section within it) can fold away so the rest
+  // of the day is scannable. Fold state lives in a shared store so it
+  // survives navigating away and back — but resets on reload. Keys are
+  // scoped by day, so each day folds independently.
+  const folds = useFolds()
+  const pgKey = (key: string): string => `pg:${date}:${key}`
+  const secKey = (groupKey: string, sectionId: string | null): string =>
+    `sec:${date}:${groupKey}:${sectionId ?? 'none'}`
   // The page's collapse-all/expand-all control: each bump overwrites
   // every block's fold state in one stroke.
   useEffect(() => {
     if (!fold || fold.seq === 0) return
-    setCollapsed(fold.collapsed ? new Set([...projects.map((p) => p.id), 'none']) : new Set())
+    folds.setMany([...projects.map((p) => pgKey(p.id)), pgKey('none')], fold.collapsed)
     // Deliberately only the bump: a projects change must not replay the
     // last broadcast over folds the user has since toggled by hand.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fold?.seq])
-  const toggle = (key: string): void =>
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
   // The project whose inline "add a task" input is open, if any.
   const [adding, setAdding] = useState<string | null>(null)
   // Same, for the "＋ section" name input (creates a section in that
   // project — the grouping lives on its project page).
   const [addingSection, setAddingSection] = useState<string | null>(null)
-  const unfold = (key: string): void =>
-    // Adding to a folded block would type into nothing — unfold it.
-    setCollapsed((prev) => {
-      if (!prev.has(key)) return prev
-      const next = new Set(prev)
-      next.delete(key)
-      return next
-    })
   const openAdder = (key: string): void => {
     setAdding((cur) => (cur === key ? null : key))
-    unfold(key)
+    // Adding to a folded block would type into nothing — unfold it.
+    folds.unfold(pgKey(key))
   }
   const openSectionAdder = (key: string): void => {
     setAddingSection((cur) => (cur === key ? null : key))
     // The section about to be created is empty — it must not be born hidden.
     setEmptyShown((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
-    unfold(key)
+    folds.unfold(pgKey(key))
   }
 
   // While a drag-reorder is persisting, `items` still carries the old DB
@@ -144,6 +137,7 @@ export function TaskGroups({
         // reveals them — hidden, they still hold the group open so the
         // chip has somewhere to live.
         const blockedIn = group.items.filter((i) => blockedSet.has(i.id))
+        const groupFolded = folds.isFolded(pgKey(group.key))
         const shown = blockedShown.has(group.key)
           ? group.items
           : group.items.filter((i) => !blockedSet.has(i.id))
@@ -249,6 +243,11 @@ export function TaskGroups({
           if (!sectioned) return <Fragment key="flat">{listed}</Fragment>
           // The gap only earns its keep when sections actually sit above.
           const gap = !sg.section && filled.length > 0 ? ' unsectioned' : ''
+          // Only sections with tasks fold — an empty one is just a drop
+          // target, with nothing to tuck away.
+          const foldable = sg.items.length > 0
+          const key = secKey(group.key, sg.section?.id ?? null)
+          const secFolded = foldable && folds.isFolded(key)
           return (
             <DropZone
               key={sg.section?.id ?? 'none'}
@@ -262,11 +261,19 @@ export function TaskGroups({
               className={`task-subgroup${gap}`}
             >
               <div
-                className={`section-subhead ${sg.items.length === 0 ? 'empty ' : ''}${showHeaders ? 'task-group-indent' : ''}`}
+                className={`section-subhead ${sg.items.length === 0 ? 'empty ' : ''}${foldable ? 'foldable ' : ''}${showHeaders ? 'task-group-indent' : ''}`}
+                role={foldable ? 'button' : undefined}
+                onClick={foldable ? () => folds.toggle(key) : undefined}
               >
+                {foldable && (
+                  // Its own element: two adjacent text nodes would merge
+                  // into one flex item and lose the gap.
+                  <span aria-hidden>{secFolded ? '▸' : '▾'}</span>
+                )}
                 {sg.section?.name ?? 'General'}
+                {secFolded && <span className="pill">{sg.items.length}</span>}
               </div>
-              {sg.items.length > 0 && listed}
+              {foldable && !secFolded && listed}
             </DropZone>
           )
         })
@@ -278,10 +285,10 @@ export function TaskGroups({
             className="task-group"
           >
             {showHeaders && (
-              <button className="task-group-header" onClick={() => toggle(group.key)}>
+              <button className="task-group-header" onClick={() => folds.toggle(pgKey(group.key))}>
                 {/* The caret gets its own element: two adjacent text
                     nodes merge into one flex item and lose the gap. */}
-                <span aria-hidden>{collapsed.has(group.key) ? '▸' : '▾'}</span>
+                <span aria-hidden>{groupFolded ? '▸' : '▾'}</span>
                 {group.project ? (
                   <>
                     <ProjectDot color={group.project.color} /> {group.project.name}
@@ -307,7 +314,7 @@ export function TaskGroups({
                 )}
                 {blockedChip}
                 {emptyChip}
-                {collapsed.has(group.key) && <span className="pill">{shown.length}</span>}
+                {groupFolded && <span className="pill">{shown.length}</span>}
                 {group.project && (
                   <span
                     className="task-group-add task-group-add-section"
@@ -327,7 +334,7 @@ export function TaskGroups({
             {/* No headers to carry the chip (nothing has a project):
                 give it a small row of its own. */}
             {!showHeaders && blockedChip && <div className="row">{blockedChip}</div>}
-            {(!showHeaders || !collapsed.has(group.key)) && (
+            {(!showHeaders || !groupFolded) && (
               <>
                 {addingSection === group.key && group.project && (
                   <div className={showHeaders ? 'task-group-indent' : undefined}>
