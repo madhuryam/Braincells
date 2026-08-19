@@ -8,6 +8,7 @@ import { ItemCard } from './ItemCard'
 import { DraggableCard, DropZone, SortableCard, usePendingOrder } from './dnd'
 import { CheckableInput, ProjectDot } from './bits'
 import { NewSectionInput } from './SectionGroups'
+import { ContextMenu } from './ContextMenu'
 
 interface TaskGroupsProps {
   items: Item[]
@@ -102,6 +103,17 @@ export function TaskGroups({
     setEmptyShown((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
     folds.unfold(pgKey(key))
   }
+  // Right-click on a section subhead: "add a task" typed straight into
+  // that section of that project, on this day. The open adder is keyed
+  // by the same secKey the fold state uses.
+  const [addingSec, setAddingSec] = useState<string | null>(null)
+  const [secMenu, setSecMenu] = useState<{
+    key: string
+    projectId: string
+    sectionId: string | null
+    x: number
+    y: number
+  } | null>(null)
 
   // While a drag-reorder is persisting, `items` still carries the old DB
   // order (the IPC write + refresh hasn't landed) but dnd-kit's sortable
@@ -264,6 +276,17 @@ export function TaskGroups({
                 className={`section-subhead ${sg.items.length === 0 ? 'empty ' : ''}${foldable ? 'foldable ' : ''}${showHeaders ? 'task-group-indent' : ''}`}
                 role={foldable ? 'button' : undefined}
                 onClick={foldable ? () => folds.toggle(key) : undefined}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setSecMenu({
+                    key,
+                    projectId: group.project!.id,
+                    sectionId: sg.section?.id ?? null,
+                    x: e.clientX,
+                    y: e.clientY
+                  })
+                }}
               >
                 {foldable && (
                   // Its own element: two adjacent text nodes would merge
@@ -273,6 +296,16 @@ export function TaskGroups({
                 {sg.section?.name ?? 'General'}
                 {secFolded && <span className="pill">{sg.items.length}</span>}
               </div>
+              {addingSec === key && (
+                <div className={showHeaders ? 'task-group-indent' : undefined}>
+                  <GroupAdder
+                    projectId={group.project!.id}
+                    date={date}
+                    sectionId={sg.section?.id ?? null}
+                    onClose={() => setAddingSec(null)}
+                  />
+                </div>
+              )}
               {foldable && !secFolded && listed}
             </DropZone>
           )
@@ -360,6 +393,22 @@ export function TaskGroups({
           </DropZone>
         )
       })}
+      {secMenu && (
+        <ContextMenu x={secMenu.x} y={secMenu.y} onClose={() => setSecMenu(null)}>
+          <button
+            className="btn ghost small"
+            style={{ justifyContent: 'flex-start' }}
+            onClick={() => {
+              setAddingSec(secMenu.key)
+              // Typing into a folded section goes nowhere — unfold it.
+              folds.unfold(secMenu.key)
+              setSecMenu(null)
+            }}
+          >
+            ＋ Add task
+          </button>
+        </ContextMenu>
+      )}
     </>
   )
 }
@@ -367,15 +416,19 @@ export function TaskGroups({
 /**
  * Inline "add a task" for one project block: types straight into that
  * project on this day. Stays focused after each add for rapid entry;
- * an empty Enter/Escape/blur closes it.
+ * an empty Enter/Escape/blur closes it. With a sectionId the task
+ * files into that section (appending, like the project page's adder);
+ * without one it stays unfiled and lands at the TOP of General.
  */
 function GroupAdder({
   projectId,
   date,
+  sectionId = null,
   onClose
 }: {
   projectId: string | null
   date: string
+  sectionId?: string | null
   onClose: () => void
 }): React.JSX.Element {
   const mutate = useMutate()
@@ -387,7 +440,15 @@ function GroupAdder({
       return
     }
     await mutate(() =>
-      window.api.createItem({ kind: 'task', title, status: 'active', projectId, scheduledDate: date })
+      window.api.createItem({
+        kind: 'task',
+        title,
+        status: 'active',
+        projectId,
+        scheduledDate: date,
+        sectionId,
+        atTop: !sectionId
+      })
     )
     setDraft('')
   }

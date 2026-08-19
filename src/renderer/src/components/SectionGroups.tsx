@@ -6,6 +6,7 @@ import { ItemCard } from './ItemCard'
 import { DraggableCard, DropZone } from './dnd'
 import { CheckableInput } from './bits'
 import { ConfirmButton } from './ConfirmButton'
+import { ContextMenu } from './ContextMenu'
 
 interface SectionGroupsProps {
   projectId: string
@@ -155,6 +156,12 @@ function ArchivedShelf({
  */
 function GeneralBlock({ projectId, items }: { projectId: string; items: Item[] }): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const openAdder = (): void => {
+    setAdding(true)
+    setCollapsed(false) // typing into a folded block goes nowhere
+  }
   return (
     <DropZone
       id={`section-none-${projectId}`}
@@ -167,19 +174,56 @@ function GeneralBlock({ projectId, items }: { projectId: string; items: Item[] }
         tabIndex={0}
         onClick={() => setCollapsed(!collapsed)}
         onKeyDown={(e) => e.key === 'Enter' && setCollapsed(!collapsed)}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setMenu({ x: e.clientX, y: e.clientY })
+        }}
       >
         <span aria-hidden>{collapsed ? '▸' : '▾'}</span>
         <span>General</span>
+        <span
+          className="task-group-add"
+          role="button"
+          aria-label="Add a task to General"
+          title="Add a task to General"
+          onClick={(e) => {
+            e.stopPropagation()
+            openAdder()
+          }}
+        >
+          ＋
+        </span>
         {collapsed && <span className="pill">{items.length}</span>}
       </div>
-      {!collapsed &&
-        (items.length > 0 ? (
-          cardsFor(items)
-        ) : (
-          <span style={{ color: 'var(--text-faint)', fontSize: 14 }}>
-            no tasks — drop one here to unfile it
-          </span>
-        ))}
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+          <button
+            className="btn ghost small"
+            style={{ justifyContent: 'flex-start' }}
+            onClick={() => {
+              setMenu(null)
+              openAdder()
+            }}
+          >
+            ＋ Add task
+          </button>
+        </ContextMenu>
+      )}
+      {!collapsed && (
+        <>
+          {adding && (
+            <SectionAdder projectId={projectId} section={null} onClose={() => setAdding(false)} />
+          )}
+          {items.length > 0
+            ? cardsFor(items)
+            : !adding && (
+                <span style={{ color: 'var(--text-faint)', fontSize: 14 }}>
+                  no tasks — drop one here to unfile it
+                </span>
+              )}
+        </>
+      )}
     </DropZone>
   )
 }
@@ -211,12 +255,18 @@ function SectionBlock({
   const [adding, setAdding] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
 
   const saveRename = async (): Promise<void> => {
     const trimmed = nameDraft.trim()
     setRenaming(false)
     if (!trimmed || trimmed === section.name) return
     await mutate(() => window.api.renameSection(section.id, trimmed))
+  }
+
+  const openAdder = (): void => {
+    setAdding(true)
+    setCollapsed(false) // typing into a folded block goes nowhere
   }
 
   return (
@@ -233,6 +283,12 @@ function SectionBlock({
         tabIndex={0}
         onClick={() => setCollapsed(!collapsed)}
         onKeyDown={(e) => e.key === 'Enter' && setCollapsed(!collapsed)}
+        onContextMenu={(e) => {
+          if (archived) return
+          e.preventDefault()
+          e.stopPropagation()
+          setMenu({ x: e.clientX, y: e.clientY })
+        }}
       >
         <span aria-hidden>{collapsed ? '▸' : '▾'}</span>
         {renaming ? (
@@ -260,8 +316,8 @@ function SectionBlock({
             title={`Add a task to ${section.name}`}
             onClick={(e) => {
               e.stopPropagation()
-              setAdding(!adding)
-              setCollapsed(false) // typing into a folded block goes nowhere
+              if (adding) setAdding(false)
+              else openAdder()
             }}
           >
             ＋
@@ -321,6 +377,64 @@ function SectionBlock({
           )}
         </span>
       </div>
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+          <button
+            className="btn ghost small"
+            style={{ justifyContent: 'flex-start' }}
+            onClick={() => {
+              setMenu(null)
+              openAdder()
+            }}
+          >
+            ＋ Add task
+          </button>
+          <button
+            className="btn ghost small"
+            style={{ justifyContent: 'flex-start' }}
+            onClick={() => {
+              setMenu(null)
+              setNameDraft(section.name)
+              setRenaming(true)
+            }}
+          >
+            ✎ Rename
+          </button>
+          <button
+            className="btn ghost small"
+            style={{ justifyContent: 'flex-start' }}
+            disabled={first}
+            onClick={() => {
+              setMenu(null)
+              onMove(-1)
+            }}
+          >
+            ↑ Move up
+          </button>
+          <button
+            className="btn ghost small"
+            style={{ justifyContent: 'flex-start' }}
+            disabled={last}
+            onClick={() => {
+              setMenu(null)
+              onMove(1)
+            }}
+          >
+            ↓ Move down
+          </button>
+          <button
+            className="btn ghost small"
+            style={{ justifyContent: 'flex-start' }}
+            title="Tasks keep their filing; restore any time"
+            onClick={() => {
+              setMenu(null)
+              void mutate(() => window.api.setSectionStatus(section.id, 'archived'))
+            }}
+          >
+            🗄 Archive
+          </button>
+        </ContextMenu>
+      )}
       {!collapsed && (
         <>
           {adding && (
@@ -356,7 +470,9 @@ function cardsFor(items: Item[]): React.JSX.Element {
 /**
  * Inline "add a task" typing straight into one section (the
  * TaskGroups GroupAdder pattern). Stays focused after each add for
- * rapid entry; an empty Enter/Escape/blur closes it.
+ * rapid entry; an empty Enter/Escape/blur closes it. A null section
+ * is the General block: the task stays unfiled and lands at the TOP
+ * of the group, not the bottom.
  */
 function SectionAdder({
   projectId,
@@ -364,7 +480,7 @@ function SectionAdder({
   onClose
 }: {
   projectId: string
-  section: Section
+  section: Section | null
   onClose: () => void
 }): React.JSX.Element {
   const mutate = useMutate()
@@ -381,7 +497,8 @@ function SectionAdder({
         title,
         status: 'active',
         projectId,
-        sectionId: section.id
+        sectionId: section?.id ?? null,
+        atTop: !section
       })
     )
     setDraft('')
@@ -389,7 +506,7 @@ function SectionAdder({
   return (
     <CheckableInput
       autoFocus
-      placeholder={`Add a task to ${section.name}…`}
+      placeholder={`Add a task to ${section?.name ?? 'General'}…`}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
