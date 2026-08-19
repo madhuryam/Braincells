@@ -8,6 +8,7 @@ import { EditingProvider } from './state/editing'
 import { Sidebar } from './components/Sidebar'
 import { SelectionBar } from './components/SelectionBar'
 import { TooltipProvider } from './components/Tooltip'
+import { ChimeTicker } from './components/ChimeTicker'
 import { AppDnd } from './components/dnd'
 import { Today } from './screens/Today'
 import { Projects } from './screens/Projects'
@@ -155,6 +156,7 @@ export default function App(): React.JSX.Element {
             <SelectionProvider>
             <EditingProvider>
               <Shortcuts />
+              <ChimeTicker />
               <AppDnd>
                 <div className="shell">
                   <Sidebar />

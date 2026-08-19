@@ -18,11 +18,20 @@ import { ProjectPicker } from '../components/ProjectPicker'
 import { DEFAULT_TIME_ZONE } from '../components/Sidebar'
 import { BackButton } from '../components/bits'
 import { ampm } from '../format'
+import {
+  CHIME_INTERVALS,
+  CHIME_SOUNDS,
+  DEFAULT_CHIME,
+  chimeScheduleLabel,
+  playChime,
+  type ChimeSetting,
+  type ChimeSoundId
+} from '../chime'
 
 type CalendarMode = 'demo' | 'google' | 'off'
 
 export function Settings(): React.JSX.Element {
-  const { theme, setTheme, showDuePill, showTimePill, setShowDuePill, setShowTimePill } = useData()
+  const { theme, setTheme, showDuePill, setShowDuePill } = useData()
   const mutate = useMutate()
   const mode = useLiveQuery(() => window.api.getSetting<CalendarMode>('calendarMode'), []) ?? 'demo'
   const google = useLiveQuery(() => window.api.googleStatus(), [])
@@ -37,6 +46,20 @@ export function Settings(): React.JSX.Element {
   // Stored as the CSS opacity (0–1); shown as a percentage.
   const timeblockedFade =
     useLiveQuery(() => window.api.getSetting<number>('timeblockedFade'), []) ?? 0.5
+  const chime =
+    useLiveQuery(() => window.api.getSetting<ChimeSetting>('chime'), []) ?? DEFAULT_CHIME
+  // Settings saved before the awake window existed lack the fields.
+  const chimeStart = chime.windowStart ?? 0
+  const chimeEnd = chime.windowEnd ?? 24
+  const saveChime = (patch: Partial<ChimeSetting>): Promise<void> =>
+    mutate(() =>
+      window.api.setSetting('chime', {
+        ...chime,
+        windowStart: chimeStart,
+        windowEnd: chimeEnd,
+        ...patch
+      })
+    )
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
   const [connecting, setConnecting] = useState(false)
@@ -114,15 +137,6 @@ export function Settings(): React.JSX.Element {
               onChange={(e) => setShowDuePill(e.target.checked)}
             />
             Show the due-date pill
-          </label>
-          <label className="row" style={{ gap: 8, cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              style={{ width: 16, height: 16, padding: 0, accentColor: 'var(--accent)' }}
-              checked={showTimePill}
-              onChange={(e) => setShowTimePill(e.target.checked)}
-            />
-            Show the time-on-calendar pill
           </label>
           <label className="row" style={{ gap: 8 }}>
             Fade once on the calendar
@@ -210,6 +224,86 @@ export function Settings(): React.JSX.Element {
                 </option>
               ))}
             </select>
+          </div>
+        </Card>
+
+        <Card className="stack">
+          <h2>Interval chime</h2>
+          <p style={{ margin: 0, color: 'var(--text-soft)' }}>
+            A teeny ding on the clock — a nudge to log what you’ve been working on. Rings{' '}
+            {chimeScheduleLabel(chime.intervalMinutes)}.
+          </p>
+          <label className="row" style={{ gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              style={{ width: 16, height: 16, padding: 0, accentColor: 'var(--accent)' }}
+              checked={chime.enabled}
+              onChange={(e) => saveChime({ enabled: e.target.checked })}
+            />
+            Play the chime
+          </label>
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            every
+            <select
+              value={chime.intervalMinutes}
+              onChange={(e) => saveChime({ intervalMinutes: Number(e.target.value) })}
+            >
+              {CHIME_INTERVALS.map((m) => (
+                <option key={m} value={m}>
+                  {m} min
+                </option>
+              ))}
+            </select>
+            sound
+            <select
+              value={chime.sound}
+              onChange={(e) => {
+                const sound = e.target.value as ChimeSoundId
+                saveChime({ sound })
+                playChime(sound)
+              }}
+            >
+              {CHIME_SOUNDS.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            <button className="btn ghost small" onClick={() => playChime(chime.sound)}>
+              ▶ preview
+            </button>
+          </div>
+          <div className="row">
+            awake from
+            <select
+              value={chimeStart}
+              onChange={(e) => {
+                const windowStart = Number(e.target.value)
+                // The window must stay a window — drag the end along
+                // if the new start would pass it.
+                saveChime({ windowStart, windowEnd: Math.max(chimeEnd, windowStart + 1) })
+              }}
+            >
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>
+                  {ampm(`${h}:00`)}
+                </option>
+              ))}
+            </select>
+            to
+            <select
+              value={chimeEnd}
+              onChange={(e) => saveChime({ windowEnd: Number(e.target.value) })}
+            >
+              {Array.from({ length: 24 - chimeStart }, (_, i) => chimeStart + 1 + i).map((h) => (
+                <option key={h} value={h}>
+                  {h === 24 ? 'midnight' : ampm(`${h}:00`)}
+                </option>
+              ))}
+            </select>
+            <span style={{ color: 'var(--text-soft)', fontSize: 14 }}>
+              — silent outside these hours
+            </span>
           </div>
         </Card>
 
