@@ -9,7 +9,9 @@ import { ymdAddDays } from '../../shared/dates'
  */
 
 // title, start, end, which weekdays it occurs on (0=Sun … 6=Sat), and
-// a Google label colorId — so the label color-coding shows in demo mode
+// a Google label colorId — so the label color-coding shows in demo mode.
+// Some carry a description / meet link / private flag, so those
+// features are visible before Google is connected.
 const TEMPLATES: Array<{
   id: string
   title: string
@@ -17,10 +19,29 @@ const TEMPLATES: Array<{
   end: string
   days: number[]
   colorId?: string
+  description?: string
+  meetLink?: string
+  private?: boolean
 }> = [
-  { id: 'demo-standup', title: 'Standup', start: '09:30', end: '09:45', days: [1, 2, 3, 4, 5], colorId: '2' },
-  { id: 'demo-planning', title: 'Weekly planning', start: '10:00', end: '11:00', days: [1], colorId: '7' },
-  { id: 'demo-1on1-sam', title: '1:1 with Sam', start: '14:00', end: '14:30', days: [2], colorId: '4' },
+  {
+    id: 'demo-standup',
+    title: 'Standup',
+    start: '09:30',
+    end: '09:45',
+    days: [1, 2, 3, 4, 5],
+    colorId: '2',
+    meetLink: 'https://meet.google.com/abc-defg-hij'
+  },
+  {
+    id: 'demo-planning',
+    title: 'Weekly planning',
+    start: '10:00',
+    end: '11:00',
+    days: [1],
+    colorId: '7',
+    description: 'Agenda:<br>• last week recap<br>• pick this week’s top three<br>• <a href="https://example.com/roadmap">roadmap doc</a>'
+  },
+  { id: 'demo-1on1-sam', title: '1:1 with Sam', start: '14:00', end: '14:30', days: [2], colorId: '4', private: true },
   { id: 'demo-design', title: 'Design review', start: '11:00', end: '12:00', days: [3], colorId: '3' },
   { id: 'demo-product', title: 'Product sync', start: '15:00', end: '15:45', days: [4], colorId: '6' },
   { id: 'demo-friday', title: 'Demo Friday 🎉', start: '16:00', end: '17:00', days: [5] }
@@ -55,11 +76,14 @@ export function demoEvents(startDate: string, endDate: string): CalendarEvent[] 
       if (t.days.includes(weekday)) {
         events.push({
           eventKey: eventKeyOf(t.id, date),
-          title: t.title,
+          // Private events wear the key, same as the Google mapping.
+          title: (t.private ? '🗝️ ' : '') + t.title,
           date,
           startTime: t.start,
           endTime: t.end,
-          colorId: t.colorId ?? null
+          colorId: t.colorId ?? null,
+          description: t.description ?? null,
+          meetLink: t.meetLink ?? null
         })
       }
     }

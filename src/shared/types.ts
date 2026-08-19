@@ -119,6 +119,12 @@ export interface CalendarEvent {
    *  one of the classic eleven. A custom-colored label carries an
    *  `eventLabelId` but no `colorId`. Absent = unlabeled. */
   eventLabelId?: string | null
+  /** The event's description, as Google sends it (may be HTML).
+   *  Sanitize before injecting into the DOM. */
+  description?: string | null
+  /** The video-call URL: hangoutLink for plain Meet events, else the
+   *  conferenceData video entry point (Zoom etc. via add-ons). */
+  meetLink?: string | null
 }
 
 /**

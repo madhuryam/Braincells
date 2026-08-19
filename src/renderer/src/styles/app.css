@@ -2288,6 +2288,30 @@ kbd.key {
   gap: 6px;
 }
 
+/* Join the video call from the meeting title — an emoji, not a pill. */
+.join-call {
+  font-size: 17px;
+  text-decoration: none;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.join-call:hover {
+  filter: brightness(1.15);
+  transform: scale(1.08);
+}
+
+/* The calendar event's own description — quiet, read-only context. */
+.meeting-description {
+  font-size: 14px;
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.meeting-description a {
+  color: var(--accent);
+}
+
 .url-chip {
   display: inline-flex;
   align-items: center;

@@ -1,9 +1,9 @@
 import { createServer, type Server } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
 import { shell } from 'electron'
-import { eventKeyOf, type CalendarEvent } from '../../shared/types'
+import type { CalendarEvent } from '../../shared/types'
 import { isDeclinedByMe } from './filter'
-import { hhmm, ymd } from '../../shared/dates'
+import { mapGoogleEvent, type RawGoogleEvent } from './map'
 import type { Store } from '../store'
 
 /**
@@ -109,37 +109,13 @@ export class GoogleCalendar {
       if (!res.ok) throw new Error(`Google Calendar: ${res.status} ${await res.text()}`)
       const body = (await res.json()) as {
         nextPageToken?: string
-        items?: Array<{
-          id: string
-          status?: string
-          summary?: string
-          colorId?: string
-          eventLabelId?: string
-          start?: { dateTime?: string; date?: string }
-          end?: { dateTime?: string; date?: string }
-          attendees?: Array<{ self?: boolean; responseStatus?: string }>
-        }>
+        items?: RawGoogleEvent[]
       }
 
       for (const e of body.items ?? []) {
-        if (e.status === 'cancelled' || !e.start) continue
         if (isDeclinedByMe(e.attendees)) continue
-        const startsAt = e.start.dateTime ? new Date(e.start.dateTime) : null
-        const date = startsAt ? ymd(startsAt) : e.start.date
-        if (!date) continue
-        events.push({
-          // Google event ids persist across edits and reschedules, which
-          // is what lets links survive (SPEC §3).
-          eventKey: eventKeyOf(e.id, date),
-          title: e.summary ?? '(untitled)',
-          date,
-          startTime: startsAt ? hhmm(startsAt) : null,
-          endTime: e.end?.dateTime ? hhmm(new Date(e.end.dateTime)) : null,
-          colorId: e.colorId ?? null,
-          // Lowercased so a label's id is one key regardless of the
-          // casing Google happens to return per event.
-          eventLabelId: e.eventLabelId ? e.eventLabelId.toLowerCase() : null
-        })
+        const mapped = mapGoogleEvent(e)
+        if (mapped) events.push(mapped)
       }
       pageToken = body.nextPageToken
     } while (pageToken)

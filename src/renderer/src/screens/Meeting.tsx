@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
+import DOMPurify from 'dompurify'
 import type { CalendarEvent, Item, Link, AttachedLink } from '@shared/types'
 import { useLiveQuery, useMutate } from '../state/data'
 import { useLabels } from '../state/labels'
@@ -168,10 +169,25 @@ export function Meeting({ eventKey, title, date, embedded = false }: MeetingProp
     />
   )
 
+  // The event's video call, joined from the title itself: a clickable
+  // 📞 beside the name, not a link pill in the chips row.
+  const joinCall = liveEvent?.meetLink ? (
+    <a
+      className="join-call"
+      href={liveEvent.meetLink}
+      target="_blank"
+      rel="noreferrer"
+      title="Join the call"
+    >
+      📞
+    </a>
+  ) : null
+
   return (
     <div className={embedded ? 'stack' : 'canvas'}>
       {embedded ? (
         <div className="row">
+          {joinCall}
           <span className="date">
             {prettyDate(date)}
             {timeLabel}
@@ -183,6 +199,7 @@ export function Meeting({ eventKey, title, date, embedded = false }: MeetingProp
         <header className="canvas-header">
           <BackButton />
           <h1>{title}</h1>
+          {joinCall}
           <span className="date">
             {prettyDate(date)}
             {timeLabel}
@@ -194,11 +211,16 @@ export function Meeting({ eventKey, title, date, embedded = false }: MeetingProp
 
       {/* The meeting's attached links (Slack, docs, …) — meeting may
           still be loading/absent; chips render from [] until then. */}
-      <AttachedLinks
-        event={event}
-        links={meeting?.links ?? []}
-        notesHtml={noteItem?.richContent ?? ''}
-      />
+      <AttachedLinks event={event} links={meeting?.links ?? []} notesHtml={noteItem?.richContent ?? ''} />
+
+      {/* The event's calendar description, when it has one — read-only
+          context from the invite (agenda, dial-in notes, …). */}
+      {liveEvent?.description && (
+        <div
+          className="meeting-description"
+          dangerouslySetInnerHTML={{ __html: descriptionHtml(liveEvent.description) }}
+        />
+      )}
 
       <div className={embedded ? 'stack' : 'today-grid'}>
         <section className="stack">
@@ -414,4 +436,19 @@ function AttachedLinks({
       onSave={(next) => mutate(() => window.api.setMeetingLinks(event, next))}
     />
   )
+}
+
+/**
+ * Google descriptions arrive as HTML (or plain text with newlines).
+ * Sanitized on the way in, and every link retargeted to _blank so it
+ * opens in the browser instead of navigating the app window.
+ */
+function descriptionHtml(desc: string): string {
+  const html = desc.includes('<') ? desc : desc.replace(/\n/g, '<br>')
+  const doc = new DOMParser().parseFromString(DOMPurify.sanitize(html), 'text/html')
+  for (const a of doc.querySelectorAll('a')) {
+    a.setAttribute('target', '_blank')
+    a.setAttribute('rel', 'noreferrer')
+  }
+  return doc.body.innerHTML
 }
