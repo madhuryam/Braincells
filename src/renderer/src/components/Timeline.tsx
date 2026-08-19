@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { useDroppable } from '@dnd-kit/core'
-import type { CalendarEvent, LocalEvent } from '@shared/types'
+import type { CalendarEvent, Item, LocalEvent } from '@shared/types'
 import { hhmm, todayYmd } from '@shared/dates'
 import { useData, useLiveQuery, useMutate } from '../state/data'
 import { useNav } from '../state/nav'
+import { shortTitle, useUndo } from '../state/undo'
+import { ContextMenu } from './ContextMenu'
 import { useLabels, type Label } from '../state/labels'
 import { ProgressBar } from './bits'
 import { ProjectPicker } from './ProjectPicker'
@@ -75,14 +77,21 @@ export function Timeline({
   date: string
   /** When given, clicking a meeting peeks it instead of navigating. */
   onPeekEvent?: (ev: { eventKey: string; title: string; date: string }) => void
-  /** When given, clicking a time-blocked task peeks it in a panel. */
-  onPeekTask?: (itemId: string) => void
+  /** When given, clicking a time-blocked task peeks it in a panel.
+   *  localEventId set = the click was on the task's EXTRA block, so
+   *  the peek anchors its time controls to that block. */
+  onPeekTask?: (itemId: string, localEventId?: string) => void
 }): React.JSX.Element {
   const events = useLiveQuery(() => window.api.calendarEvents(date, date), [date]) ?? []
   // Open AND done — a checked-off block stays (faded) as the record
   // of the day rather than vanishing off the schedule.
   const blocks = useLiveQuery(() => window.api.scheduledBlocks(date), [date]) ?? []
   const locals = useLiveQuery(() => window.api.localEventsFor(date), [date]) ?? []
+  // A local block that points at a task is that task's EXTRA block —
+  // it dresses and behaves exactly like the task's own block, so the
+  // two are indistinguishable on the schedule.
+  const plainLocals = locals.filter((l) => !l.itemId)
+  const linkedLocals = locals.filter((l) => l.itemId)
   const eventKeys = events.map((e) => e.eventKey).join(',')
   const prep = useLiveQuery(() => window.api.prepProgress(events.map((e) => e.eventKey)), [eventKeys]) ?? []
   const { projects } = useData()
@@ -110,6 +119,15 @@ export function Timeline({
   const [resizing, setResizing] = useState<{ id: string; start: number; end: number } | null>(null)
   // A time-blocked task mid drag/resize renders from this override.
   const [taskDrag, setTaskDrag] = useState<{ id: string; start: number; end: number } | null>(null)
+  // Right-click on a task block: the same quick menu a list card gets.
+  // localEventId set = the click was on a task's EXTRA block, so "off
+  // calendar" removes that block, not the task's own slot.
+  const [taskMenu, setTaskMenu] = useState<{
+    id: string
+    localEventId?: string
+    x: number
+    y: number
+  } | null>(null)
   const suppressClick = useRef(false) // a resize's mouseup must not open the editor
   const timelineRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -296,6 +314,62 @@ export function Timeline({
     window.addEventListener('mouseup', onUp)
   }
 
+  // A task's extra block mirrors the task-block gestures — drag the
+  // body to move, the bottom edge to resize, a plain click peeks the
+  // task — but writes its own start/end, never the task's fields.
+  const startLocalDrag = (e: React.MouseEvent, l: LocalEvent, mode: 'move' | 'end'): void => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    e.preventDefault()
+    const rect = timelineRef.current!.getBoundingClientRect()
+    const rawAt = (clientY: number): number => dayStart + (clientY - rect.top) / PX_PER_MIN
+    const origStart = toMin(l.startTime)
+    const origEnd = Math.max(toMin(l.endTime), origStart + SLOT_MIN)
+    const dur = origEnd - origStart
+    const grabOffset = mode === 'move' ? rawAt(e.clientY) - origStart : 0
+    let next = { start: origStart, end: origEnd }
+    let moved = false
+
+    const onMove = (me: MouseEvent): void => {
+      if (mode === 'move') {
+        const s = Math.max(
+          dayStart,
+          Math.min(dayEnd - dur, Math.round((rawAt(me.clientY) - grabOffset) / SLOT_MIN) * SLOT_MIN)
+        )
+        next = { start: s, end: s + dur }
+      } else {
+        const end = Math.min(
+          dayEnd,
+          Math.max(origStart + SLOT_MIN, Math.round(rawAt(me.clientY) / SLOT_MIN) * SLOT_MIN)
+        )
+        next = { start: origStart, end }
+      }
+      moved = true
+      setTaskDrag({ id: l.id, ...next })
+    }
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setTaskDrag(null)
+      // No real drag → treat as a click and peek the task it points
+      // at, anchored to THIS block so the peek shows these times.
+      if (!moved || (next.start === origStart && next.end === origEnd)) {
+        if (l.itemId) onPeekTask?.(l.itemId, l.id)
+        return
+      }
+      suppressClick.current = true
+      window.setTimeout(() => (suppressClick.current = false), 150)
+      mutate(() =>
+        window.api.updateLocalEvent(l.id, {
+          startTime: toHHMM(next.start),
+          endTime: toHHMM(next.end)
+        })
+      )
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   const totalHeight = (dayEnd - dayStart) * PX_PER_MIN
 
   // When a day first comes into view, scroll its timeline so the now-line
@@ -382,7 +456,7 @@ export function Timeline({
               )
             })}
 
-            {locals.map((l) => {
+            {plainLocals.map((l) => {
               const rs = resizing?.id === l.id ? resizing : null
               const start = rs ? rs.start : toMin(l.startTime)
               const end = rs ? rs.end : Math.max(toMin(l.endTime), toMin(l.startTime) + SLOT_MIN)
@@ -451,6 +525,11 @@ export function Timeline({
                       : `${t.title} — click to open, drag to move, drag the bottom edge to resize`
                   }
                   onMouseDown={(e) => startTaskDrag(e, t, 'move')}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setTaskMenu({ id: t.id, x: e.clientX, y: e.clientY })
+                  }}
                 >
                   {t.status === 'done' ? '✓ ' : ''}
                   {t.title}{' '}
@@ -458,6 +537,52 @@ export function Timeline({
                     {ampm(toHHMM(start))}–{ampm(toHHMM(start + dur))}
                   </span>
                   <div className="le-handle bottom" onMouseDown={(e) => startTaskDrag(e, t, 'end')} />
+                </div>
+              )
+            })}
+
+            {/* a task's EXTRA blocks — local events pointing back at a
+                task. Dressed and behaving exactly like the task's own
+                block above: click peeks the task, drag moves, the
+                bottom edge resizes (this block only, never the task). */}
+            {linkedLocals.map((l) => {
+              const item = blocks.find((b) => b.id === l.itemId)
+              const td = taskDrag?.id === l.id ? taskDrag : null
+              const start = td ? td.start : toMin(l.startTime)
+              const end = td ? td.end : Math.max(toMin(l.endTime), toMin(l.startTime) + SLOT_MIN)
+              const done = item?.status === 'done'
+              const missed = isToday && end < nowMins && item?.status === 'active'
+              const proj = projects.find((p) => p.id === (item?.projectId ?? l.projectId))
+              const label = item?.title ?? l.title
+              return (
+                <div
+                  key={l.id}
+                  className={`timeline-task ${done ? 'done' : ''} ${missed ? 'missed' : ''}`}
+                  style={{
+                    top: y(start),
+                    height: Math.max((end - start) * PX_PER_MIN, 26),
+                    ...colStyle(`l-${l.id}`),
+                    ...(proj ? { borderLeftColor: proj.color } : {})
+                  }}
+                  title={
+                    missed
+                      ? 'Missed the block — no big deal, it’s still on your list'
+                      : `${label} — click to open, drag to move, drag the bottom edge to resize`
+                  }
+                  onMouseDown={(e) => startLocalDrag(e, l, 'move')}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (l.itemId)
+                      setTaskMenu({ id: l.itemId, localEventId: l.id, x: e.clientX, y: e.clientY })
+                  }}
+                >
+                  {done ? '✓ ' : ''}
+                  {label}{' '}
+                  <span className="le-time">
+                    {ampm(toHHMM(start))}–{ampm(toHHMM(end))}
+                  </span>
+                  <div className="le-handle bottom" onMouseDown={(e) => startLocalDrag(e, l, 'end')} />
                 </div>
               )
             })}
@@ -492,7 +617,98 @@ export function Timeline({
           )}
         </div>
       </div>
+
+      {taskMenu &&
+        (() => {
+          const t = blocks.find((b) => b.id === taskMenu.id)
+          return t ? (
+            <TaskBlockMenu
+              task={t}
+              localEventId={taskMenu.localEventId ?? null}
+              x={taskMenu.x}
+              y={taskMenu.y}
+              onClose={() => setTaskMenu(null)}
+            />
+          ) : null
+        })()}
     </div>
+  )
+}
+
+/**
+ * The right-click menu on a time-blocked task: take it off the timeline
+ * (the task itself stays on its list), or delete it outright — two-step
+ * like the card menu's 🗑, with the same undo toast. On a task's EXTRA
+ * block (localEventId set), "off calendar" removes just that block.
+ */
+function TaskBlockMenu({
+  task,
+  localEventId = null,
+  x,
+  y,
+  onClose
+}: {
+  task: Item
+  /** Set when the menu opened on a linked local block, not the task's own. */
+  localEventId?: string | null
+  x: number
+  y: number
+  onClose: () => void
+}): React.JSX.Element {
+  const mutate = useMutate()
+  const { pushUndo } = useUndo()
+  const [dropArmed, setDropArmed] = useState(false)
+
+  return (
+    <ContextMenu x={x} y={y} onClose={onClose}>
+      <button
+        className="btn ghost small"
+        style={{ justifyContent: 'flex-start' }}
+        title={
+          localEventId
+            ? 'Remove this extra block — the task keeps its own slot'
+            : 'Keep the task, take this block off the timeline'
+        }
+        onClick={() => {
+          onClose()
+          void mutate(() =>
+            localEventId
+              ? window.api.deleteLocalEvent(localEventId)
+              : window.api.updateItem(task.id, { scheduledTime: null, timeEstimateMinutes: null })
+          )
+        }}
+      >
+        ✕ Off calendar
+      </button>
+      <button
+        className="btn ghost small"
+        style={{
+          justifyContent: 'flex-start',
+          ...(dropArmed ? { color: 'var(--danger)', fontWeight: 700 } : {})
+        }}
+        onClick={() => {
+          // Two-step, like the card menu's 🗑 — a stray click can't
+          // discard the task.
+          if (!dropArmed) {
+            setDropArmed(true)
+            return
+          }
+          onClose()
+          const prev = task.status
+          void mutate(async () => {
+            // Dropping from an extra block takes that block with it —
+            // a dropped task must not leave orphan time on the schedule.
+            if (localEventId) await window.api.deleteLocalEvent(localEventId)
+            await window.api.updateItem(task.id, { status: 'dropped' })
+          })
+          pushUndo(`Dropped “${shortTitle(task.title)}”`, async () => {
+            await window.api.updateItem(task.id, { status: prev })
+          })
+        }}
+      >
+        {dropArmed ? '🗑 Confirm Delete' : '🗑 Delete'}
+      </button>
+    </ContextMenu>
   )
 }
 
@@ -655,7 +871,8 @@ function TaskDraftEditor({
             projectId: f.projectId,
             scheduledDate: date,
             scheduledTime: f.start,
-            timeEstimateMinutes: duration
+            timeEstimateMinutes: duration,
+            atTop: true
           })
           .then((created) => {
             idRef.current = created.id
