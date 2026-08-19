@@ -50,11 +50,9 @@ interface DataContextValue {
   setTheme: (t: ThemeId) => void
   /** Flip into the dark theme and back to the last light one. */
   toggleDark: () => void
-  /** Card pills the user can hide: due date, and time-on-calendar. */
+  /** Card pills the user can hide: due date. */
   showDuePill: boolean
-  showTimePill: boolean
   setShowDuePill: (v: boolean) => void
-  setShowTimePill: (v: boolean) => void
 }
 
 const DataContext = createContext<DataContextValue | null>(null)
@@ -67,7 +65,6 @@ export function DataProvider({ children }: { children: ReactNode }): React.JSX.E
   const [dark, setDark] = useState(false)
   // Pills default on; a stored `false` hides them.
   const [showDuePill, setShowDuePillState] = useState(true)
-  const [showTimePill, setShowTimePillState] = useState(true)
 
   const bump = useCallback(() => setVersion((v) => v + 1), [])
 
@@ -96,17 +93,10 @@ export function DataProvider({ children }: { children: ReactNode }): React.JSX.E
     window.api.getSetting<boolean>('showDuePill').then((v) => {
       if (v === false) setShowDuePillState(false)
     })
-    window.api.getSetting<boolean>('showTimePill').then((v) => {
-      if (v === false) setShowTimePillState(false)
-    })
   }, [])
   const setShowDuePill = useCallback((v: boolean) => {
     setShowDuePillState(v)
     window.api.setSetting('showDuePill', v)
-  }, [])
-  const setShowTimePill = useCallback((v: boolean) => {
-    setShowTimePillState(v)
-    window.api.setSetting('showTimePill', v)
   }, [])
 
   // How far a time-blocked task's row fades in day lists (Settings →
@@ -157,9 +147,7 @@ export function DataProvider({ children }: { children: ReactNode }): React.JSX.E
         setTheme,
         toggleDark,
         showDuePill,
-        showTimePill,
-        setShowDuePill,
-        setShowTimePill
+        setShowDuePill
       }}
     >
       {children}

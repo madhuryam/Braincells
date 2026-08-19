@@ -19,7 +19,7 @@ import { extractLinksFromHtml } from '../links'
 import { ProjectPicker } from './ProjectPicker'
 import { RichEditor, type RichEditorHandle } from './RichEditor'
 import { itemBodyHtml } from '../richtext'
-import { KIND_ICON, mmdd, prettyDate, projectLabel, rollingDays } from './../format'
+import { durationLabel, KIND_ICON, mmdd, prettyDate, projectLabel, rollingDays } from './../format'
 
 interface ItemCardProps {
   item: Item
@@ -218,7 +218,7 @@ export function ItemCard({
   }
   const [title, setTitle] = useState(item.title)
   const mutate = useMutate()
-  const { projects, showDuePill, showTimePill } = useData()
+  const { projects, showDuePill } = useData()
   const { selected, toggle } = useSelection()
   const multiSelected = selected.has(item.id)
   const { openOverlay } = useNav()
@@ -269,17 +269,6 @@ export function ItemCard({
       [item.id, isCheckable]
     ) ?? []
 
-  // Total time on the calendar — every block for this task summed, not
-  // just its first slot. Only queried when there's a block to measure;
-  // the item's own estimate stands in until it resolves.
-  const calendarMinutes =
-    useLiveQuery(
-      () =>
-        item.timeEstimateMinutes != null
-          ? window.api.calendarMinutes(item.id)
-          : Promise.resolve(null),
-      [item.id, item.timeEstimateMinutes]
-    ) ?? item.timeEstimateMinutes
   const subtasksDone = subtaskTree.filter(({ item: s }) => s.status === 'done').length
   // While a subtask drag-reorder is persisting, the tree still carries
   // the old DB order (same trap TaskGroups dodges) — re-rank the moved
@@ -404,6 +393,14 @@ export function ItemCard({
           : Promise.resolve([]),
       [menu !== null, menuMode]
     ) ?? []
+  // Total time this task holds (or held) on the calendar — every block
+  // summed, same number the peeks show. Only queried while the editor
+  // is open; that's the only place it renders.
+  const calendarMinutes =
+    useLiveQuery(
+      () => (open && isCheckable ? window.api.calendarMinutes(item.id) : Promise.resolve(0)),
+      [open, isCheckable, item.id]
+    ) ?? 0
   // The task's existing meeting links (📅 chips in the open editor).
   const eventLinks = (
     useLiveQuery(
@@ -701,9 +698,6 @@ export function ItemCard({
                   ⛔ blocked
                 </span>
               )}
-              {showTimePill && item.timeEstimateMinutes != null && (
-                <span className="pill">~{calendarMinutes}m</span>
-              )}
               {subtaskTree.length > 0 && (
                 <span className="pill subtask-count" title="subtasks">
                   ☑ {subtasksDone}/{subtaskTree.length}
@@ -860,6 +854,15 @@ export function ItemCard({
                 />
               </div>
             </div>
+            {/* How much calendar time this task holds — or, once done,
+              took. All blocks summed; same figure as the peeks. */}
+            {calendarMinutes > 0 && (
+              <div className="row" style={{ gap: 6 }}>
+                <span className="pill" title="Total time blocked on the calendar, all blocks summed">
+                  ⏱ {durationLabel(calendarMinutes)} on calendar
+                </span>
+              </div>
+            )}
             {/* What this task waits on. Done blockers stay, struck
               through — the history of what gated this — and the ✕
               severs just the dependency, never the other task. */}
