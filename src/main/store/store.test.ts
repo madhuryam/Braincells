@@ -291,6 +291,29 @@ describe('Today / This Week / carried over', () => {
     expect(store.getItem(estimated.id)!.timeEstimateMinutes).toBe(30)
   })
 
+  it('carry-over leaves the missed block on the old day as a linked local event', () => {
+    const yesterday = ymdAddDays(today, -1)
+    const blocked = store.createItem({
+      kind: 'task', title: 'blocked', status: 'active', projectId: null,
+      scheduledDate: yesterday, scheduledTime: '09:00', timeEstimateMinutes: 45
+    })
+    // No time = nothing to preserve; the roll leaves no block behind.
+    store.createItem({
+      kind: 'task', title: 'untimed', status: 'active', scheduledDate: yesterday
+    })
+
+    expect(store.carryOver(today)).toBe(2)
+    const kept = store.localEventsFor(yesterday)
+    expect(kept).toHaveLength(1)
+    expect(kept[0]).toMatchObject({
+      title: 'blocked', date: yesterday, startTime: '09:00', endTime: '09:45', itemId: blocked.id
+    })
+    // A second roll must not duplicate the history block.
+    expect(store.carryOver(ymdAddDays(today, 1))).toBe(2)
+    expect(store.localEventsFor(yesterday)).toHaveLength(1)
+    expect(store.localEventsFor(today)).toHaveLength(0)
+  })
+
   it('done and dropped tasks never carry over', () => {
     const a = store.createItem({
       kind: 'task', title: 'a', status: 'active', scheduledDate: ymdAddDays(today, -2)

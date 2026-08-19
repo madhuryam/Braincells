@@ -520,18 +520,51 @@ export class Store {
    * A missed time block does NOT follow the task: it lands on the new
    * day's list only, off the calendar, until it's re-blocked on
    * purpose. (The estimate is cleared with the time — it only existed
-   * as the block's length, same as removeFromCalendar.)
+   * as the block's length, same as removeFromCalendar.) The block
+   * itself stays behind on the old day as a linked local event, so
+   * past timelines keep their record whether the task got done or not.
    */
   carryOver(today: string): number {
-    return this.db
-      .prepare(
-        `UPDATE items SET scheduled_date = ?,
-           time_estimate_minutes = CASE WHEN scheduled_time IS NOT NULL
-             THEN NULL ELSE time_estimate_minutes END,
-           scheduled_time = NULL
-         WHERE kind = 'task' AND status = 'active' AND scheduled_date < ?`
-      )
-      .run(today, today).changes
+    return this.db.transaction(() => {
+      const timed = this.db
+        .prepare(
+          `SELECT id, title, scheduled_date AS date, scheduled_time AS start,
+                  time_estimate_minutes AS est, project_id AS projectId
+           FROM items
+           WHERE kind = 'task' AND status = 'active'
+             AND scheduled_date < ? AND scheduled_time IS NOT NULL`
+        )
+        .all(today) as Array<{
+        id: string
+        title: string
+        date: string
+        start: string
+        est: number | null
+        projectId: string | null
+      }>
+      for (const t of timed) {
+        const [h, m] = t.start.split(':').map(Number)
+        const endMin = Math.min(h * 60 + m + (t.est ?? 30), 24 * 60 - 1)
+        const end = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`
+        this.createLocalEvent({
+          title: t.title,
+          date: t.date,
+          startTime: t.start,
+          endTime: end,
+          projectId: t.projectId,
+          itemId: t.id
+        })
+      }
+      return this.db
+        .prepare(
+          `UPDATE items SET scheduled_date = ?,
+             time_estimate_minutes = CASE WHEN scheduled_time IS NOT NULL
+               THEN NULL ELSE time_estimate_minutes END,
+             scheduled_time = NULL
+           WHERE kind = 'task' AND status = 'active' AND scheduled_date < ?`
+        )
+        .run(today, today).changes
+    })()
   }
 
   /** Live (active or inbox) tasks whose deadline is exactly this date. */
