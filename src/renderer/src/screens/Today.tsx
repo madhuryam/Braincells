@@ -74,8 +74,10 @@ export function Today(): React.JSX.Element {
   // A clicked calendar event peeks in a panel over the schedule —
   // no page navigation just to glance at a meeting.
   const [peek, setPeek] = useState<{ eventKey: string; title: string; date: string } | null>(null)
-  // A clicked time-blocked task peeks in the same panel slot.
-  const [peekTask, setPeekTask] = useState<string | null>(null)
+  // A clicked time-blocked task peeks in the same panel slot. The
+  // localEventId rides along when the click was on the task's EXTRA
+  // block, so the peek edits that block's times, not the main slot.
+  const [peekTask, setPeekTask] = useState<{ itemId: string; localEventId?: string } | null>(null)
   const closePeeks = (): void => {
     setPeek(null)
     setPeekTask(null)
@@ -133,7 +135,7 @@ export function Today(): React.JSX.Element {
     const title = taskDraft.trim()
     if (!title) return
     await mutate(() =>
-      window.api.createItem({ kind: 'task', title, status: 'active', scheduledDate: date })
+      window.api.createItem({ kind: 'task', title, status: 'active', scheduledDate: date, atTop: true })
     )
     setTaskDraft('')
   }
@@ -167,196 +169,201 @@ export function Today(): React.JSX.Element {
           setPeek(m)
         }}
       >
-      <div className="today-grid">
-        {/* Left column: tasks for the rolling 5-day window. (The old
+        <div className="today-grid">
+          {/* Left column: tasks for the rolling 5-day window. (The old
             "Capture anything" input is gone — the task quick-add below
             and ⌥Space capture cover both cases.) */}
-        <section>
-          {/* The viewed day's own sections sit on a soft accent wash;
+          <section>
+            {/* The viewed day's own sections sit on a soft accent wash;
               the rest of the week stays plain below. */}
-          <div className="today-scope">
-            <DropZone id="list-today" data={{ type: 'schedule', date }}>
-              <div className="row" style={{ margin: '14px 0 10px', gap: 8 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <CheckableInput
-                    id="quick-capture"
-                    placeholder="Add a task for today…"
-                    value={taskDraft}
-                    onChange={(e) => setTaskDraft(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && addTask()}
-                  />
-                </div>
-                {/* Hugs the task list's top-right corner: one click
+            <div className="today-scope">
+              <DropZone id="list-today" data={{ type: 'schedule', date }}>
+                <div className="row" style={{ margin: '14px 0 10px', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <CheckableInput
+                      id="quick-capture"
+                      placeholder="Add a task for today…"
+                      value={taskDraft}
+                      onChange={(e) => setTaskDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addTask()}
+                    />
+                  </div>
+                  {/* Hugs the task list's top-right corner: one click
                     folds/unfolds every project block below AND the
                     Coming up section — the whole column packs up. */}
-                <button
-                  className="btn ghost icon-btn"
-                  title={fold.collapsed ? 'Expand all' : 'Collapse all'}
-                  onClick={() => {
-                    const collapsed = !fold.collapsed
-                    setFold((f) => ({ seq: f.seq + 1, collapsed }))
-                    setShowComingUp(!collapsed)
-                  }}
-                >
-                  <Chevron up={!fold.collapsed} />
-                </button>
-              </div>
-              {/* The lotus only when the day is truly blank: if items
+                  <button
+                    className="btn ghost icon-btn"
+                    title={fold.collapsed ? 'Expand all' : 'Collapse all'}
+                    onClick={() => {
+                      const collapsed = !fold.collapsed
+                      setFold((f) => ({ seq: f.seq + 1, collapsed }))
+                      setShowComingUp(!collapsed)
+                    }}
+                  >
+                    <Chevron up={!fold.collapsed} />
+                  </button>
+                </div>
+                {/* The lotus only when the day is truly blank: if items
                 sit in Done, the slate wasn't clean — it's been worked
                 through (today) or swept forward (a past day). The
                 section stays (blank) as a drop target either way. */}
-              {tasks.length === 0 && doneToday.length === 0 && (
-                <EmptyState art="🪷"> a clean slate, no scheduled tasks
-                </EmptyState>
-              )}
-              {/* One block per project; drag to reprioritize within a block.
+                {tasks.length === 0 && doneToday.length === 0 && (
+                  <EmptyState art=""> no currently scheduled tasks
+                  </EmptyState>
+                )}
+                {/* One block per project; drag to reprioritize within a block.
                 The show-all control lives inside the last block so it
                 folds away with it. */}
-              <TaskGroups
-                items={visibleTasks}
-                date={date}
-                sortable
-                fold={fold}
-                footer={
-                  tasks.length > TOP_TASK_CAP ? (
-                    <button className="btn ghost" style={{ marginTop: 4 }} onClick={() => setShowAll(!showAll)}>
-                      {showAll ? 'Show fewer' : `Show all ${tasks.length}`}
-                    </button>
-                  ) : undefined
-                }
-              />
-            </DropZone>
+                <TaskGroups
+                  items={visibleTasks}
+                  date={date}
+                  sortable
+                  fold={fold}
+                  footer={
+                    tasks.length > TOP_TASK_CAP ? (
+                      <button className="btn ghost" style={{ marginTop: 4 }} onClick={() => setShowAll(!showAll)}>
+                        {showAll ? 'Show fewer' : `Show all ${tasks.length}`}
+                      </button>
+                    ) : undefined
+                  }
+                />
+              </DropZone>
 
-            {/* Checked-off things don't vanish — they move down here,
+              {/* Checked-off things don't vanish — they move down here,
               still uncheckable if it was an accident. */}
-            {doneToday.length > 0 && (
-              <>
-                <button className="section-label day-toggle" onClick={() => setShowDone(!showDone)}>
-                  {showDone ? '▾' : '▸'} {date === today ? 'Done today' : 'Done'}
-                  <span className="pill">{doneToday.length}</span>
-                </button>
-                {showDone && <DoneList date={date} />}
-              </>
-            )}
+              {doneToday.length > 0 && (
+                <>
+                  <button className="section-label day-toggle" onClick={() => setShowDone(!showDone)}>
+                    {showDone ? '▾' : '▸'} {date === today ? 'Done today' : 'Done'}
+                    <span className="pill">{doneToday.length}</span>
+                  </button>
+                  {showDone && <DoneList date={date} />}
+                </>
+              )}
 
-          </div>
+            </div>
 
-          {/* 📥 Intake: unfiled captures and meeting follow-ups waiting
+            {/* 📥 Intake: unfiled captures and meeting follow-ups waiting
             for a home. Checkboxes gather a selection (the floating bar
             schedules several at once); drag one onto a sidebar project
             or a day below, or open it and file it — it leaves here the
             moment it's claimed. */}
-          {intake.length > 0 && (
-            <>
-              <div className="section-label coming-up row">
-                📥 Intake
-                <span className="pill">{intake.length}</span>
-              </div>
-              <div className="item-list">
-                <AnimatePresence initial={false}>
-                  {intake.map((item) => (
-                    <DraggableCard key={item.id} item={item}>
-                      <ItemCard item={item} checkboxSelects />
-                    </DraggableCard>
-                  ))}
-                </AnimatePresence>
-              </div>
-            </>
-          )}
-
-          {/* The rest of the 5-day window, one collapsible group per day. */}
-          <button
-            className="section-label day-toggle coming-up"
-            onClick={() => setShowComingUp(!showComingUp)}
-          >
-            {showComingUp ? '▾' : '▸'} Coming up
-          </button>
-          {showComingUp &&
-            rollingDays()
-              .slice(1)
-              .map((day) => <DaySection key={day.date} day={day} />)}
-
-          {/* Undated tasks sink to the very bottom, folded — around,
-            not in the way, until one gets dragged onto a day. */}
-          {backlog.length > 0 && (
-            <>
-              <button
-                className="section-label day-toggle coming-up"
-                onClick={() => setShowBacklog(!showBacklog)}
-              >
-                {showBacklog ? '▾' : '▸'} Backlog
-                <span className="pill">{backlog.length}</span>
-              </button>
-              {showBacklog && (
+            {intake.length > 0 && (
+              <>
+                <div className="section-label coming-up row">
+                  📥 Intake
+                  <span className="pill">{intake.length}</span>
+                </div>
                 <div className="item-list">
                   <AnimatePresence initial={false}>
-                    {backlog.map((item) => (
+                    {intake.map((item) => (
                       <DraggableCard key={item.id} item={item}>
-                        <ItemCard item={item} />
+                        <ItemCard item={item} checkboxSelects />
                       </DraggableCard>
                     ))}
                   </AnimatePresence>
                 </div>
-              )}
-            </>
-          )}
-        </section>
+              </>
+            )}
 
-        {/* Right column: the chosen day's schedule (events + time blocks). */}
-        <section className="timeline-pane" ref={paneRef}>
-          <div className="section-label">Schedule</div>
-          {/* The fill layer lets the timeline run the full length of the
+            {/* The rest of the 5-day window, one collapsible group per day. */}
+            <button
+              className="section-label day-toggle coming-up"
+              onClick={() => setShowComingUp(!showComingUp)}
+            >
+              {showComingUp ? '▾' : '▸'} Coming up
+            </button>
+            {showComingUp &&
+              rollingDays()
+                .slice(1)
+                .map((day) => <DaySection key={day.date} day={day} />)}
+
+            {/* Undated tasks sink to the very bottom, folded — around,
+            not in the way, until one gets dragged onto a day. */}
+            {backlog.length > 0 && (
+              <>
+                <button
+                  className="section-label day-toggle coming-up"
+                  onClick={() => setShowBacklog(!showBacklog)}
+                >
+                  {showBacklog ? '▾' : '▸'} Backlog
+                  <span className="pill">{backlog.length}</span>
+                </button>
+                {showBacklog && (
+                  <div className="item-list">
+                    <AnimatePresence initial={false}>
+                      {backlog.map((item) => (
+                        <DraggableCard key={item.id} item={item}>
+                          <ItemCard item={item} />
+                        </DraggableCard>
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+
+          {/* Right column: the chosen day's schedule (events + time blocks). */}
+          <section className="timeline-pane" ref={paneRef}>
+            <div className="section-label">Schedule</div>
+            {/* The fill layer lets the timeline run the full length of the
               day list beside it (see .timeline-fill in app.css). */}
-          <div className="timeline-fill">
-            <Timeline
-              date={date}
-              onPeekEvent={(e) => {
-                setPeekTask(null)
-                setPeek(e)
-              }}
-              onPeekTask={(id) => {
-                setPeek(null)
-                setPeekTask(id)
-              }}
-            />
-          </div>
-          {peek && (
-            <div
-              className="timeline-peek"
-              style={peekBox ? { right: peekBox.right, width: peekBox.width } : undefined}
-            >
-              <DetailPanel
-                title={peek.title}
-                onOpenFull={() =>
-                  openOverlay({ name: 'meeting', eventKey: peek.eventKey, title: peek.title, date: peek.date })
-                }
-                onClose={() => setPeek(null)}
+            <div className="timeline-fill">
+              <Timeline
+                date={date}
+                onPeekEvent={(e) => {
+                  setPeekTask(null)
+                  setPeek(e)
+                }}
+                onPeekTask={(itemId, localEventId) => {
+                  setPeek(null)
+                  setPeekTask({ itemId, localEventId })
+                }}
+              />
+            </div>
+            {peek && (
+              <div
+                className="timeline-peek"
+                style={peekBox ? { right: peekBox.right, width: peekBox.width } : undefined}
               >
-                <Meeting
-                  key={peek.eventKey}
-                  embedded
-                  eventKey={peek.eventKey}
+                <DetailPanel
                   title={peek.title}
-                  date={peek.date}
-                />
-              </DetailPanel>
-            </div>
-          )}
-          {peekTask && (
-            <div
-              className="timeline-peek"
-              style={peekBox ? { right: peekBox.right, width: peekBox.width } : undefined}
-            >
-              <DetailPanel
-                onOpenFull={() => openOverlay({ name: 'page', itemId: peekTask })}
-                onClose={() => setPeekTask(null)}
+                  onOpenFull={() =>
+                    openOverlay({ name: 'meeting', eventKey: peek.eventKey, title: peek.title, date: peek.date })
+                  }
+                  onClose={() => setPeek(null)}
+                >
+                  <Meeting
+                    key={peek.eventKey}
+                    embedded
+                    eventKey={peek.eventKey}
+                    title={peek.title}
+                    date={peek.date}
+                  />
+                </DetailPanel>
+              </div>
+            )}
+            {peekTask && (
+              <div
+                className="timeline-peek"
+                style={peekBox ? { right: peekBox.right, width: peekBox.width } : undefined}
               >
-                <TaskPeek key={peekTask} itemId={peekTask} onClose={closePeeks} />
-              </DetailPanel>
-            </div>
-          )}
-        </section>
-      </div>
+                <DetailPanel
+                  onOpenFull={() => openOverlay({ name: 'page', itemId: peekTask.itemId })}
+                  onClose={() => setPeekTask(null)}
+                >
+                  <TaskPeek
+                    key={`${peekTask.itemId}:${peekTask.localEventId ?? 'own'}`}
+                    itemId={peekTask.itemId}
+                    localEventId={peekTask.localEventId ?? null}
+                    onClose={closePeeks}
+                  />
+                </DetailPanel>
+              </div>
+            )}
+          </section>
+        </div>
       </MeetingPeekProvider>
     </div>
   )
@@ -431,7 +438,8 @@ function DayQuickAdd({ date, onClose }: { date: string; onClose: () => void }): 
         title: t,
         status: 'active',
         scheduledDate: date,
-        projectId
+        projectId,
+        atTop: true
       })
     )
     setTitle('') // stay open for the next one; keep the chosen project

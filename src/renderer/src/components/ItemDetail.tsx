@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useData, useLiveQuery, useMutate } from '../state/data'
 import { useNav } from '../state/nav'
 import { Checkbox, ProjectDot } from './bits'
-import { KIND_ICON, prettyDate, projectLabel } from '../format'
+import { durationLabel, KIND_ICON, prettyDate, projectLabel } from '../format'
 import { LinkChips } from './LinkChips'
 import { extractLinksFromHtml } from '../links'
-import { RichEditor } from './RichEditor'
-import { itemBodyHtml } from '../richtext'
+import { ItemNotes } from './ItemNotes'
 
 /**
  * Single-item view for the detail panel: a single header row (title,
@@ -24,57 +23,12 @@ export function ItemDetail({
   onClose?: () => void
 }): React.JSX.Element | null {
   const item = useLiveQuery(() => window.api.getItem(itemId), [itemId])
-  const { projects, bump } = useData()
+  const { projects } = useData()
   const { openOverlay } = useNav()
   const mutate = useMutate()
-
-  // Reseed on outside edits: the editor seeds once per mount, so when
-  // the stored body comes back different from what this editor last
-  // saw — e.g. the full canvas was opened over this peek, edited, and
-  // closed — remount it via an epoch in the key. Our own saves
-  // round-trip byte-identical and never trigger it.
-  const lastHtml = useRef<string | null>(null)
-  const [epoch, setEpoch] = useState(0)
-
-  // Notes autosave: the rich editor owns the text while typing; saves
-  // land 600ms after the last keystroke, and flush on close/unmount.
-  const pendingBody = useRef<{ html: string; text: string } | null>(null)
-  const bodyTimer = useRef<number | undefined>(undefined)
-  const flushBody = (): void => {
-    window.clearTimeout(bodyTimer.current)
-    const p = pendingBody.current
-    pendingBody.current = null
-    if (p) mutate(() => window.api.updateItem(itemId, { richContent: p.html, content: p.text }))
-  }
-  const onBodyChange = (html: string, text: string): void => {
-    lastHtml.current = html
-    pendingBody.current = { html, text }
-    window.clearTimeout(bodyTimer.current)
-    bodyTimer.current = window.setTimeout(flushBody, 600)
-  }
-  useEffect(
-    () => () => {
-      // Unmount flush goes straight to the API, then bumps so the
-      // surfaces still on screen (list cards) show the edit.
-      const p = pendingBody.current
-      pendingBody.current = null
-      window.clearTimeout(bodyTimer.current)
-      if (p)
-        window.api.updateItem(itemId, { richContent: p.html, content: p.text }).then(bump)
-    },
-    [itemId, bump]
-  )
-
-  const bodyHtml = item ? itemBodyHtml(item) : null
-  useEffect(() => {
-    if (bodyHtml === null) return
-    if (lastHtml.current === null) {
-      lastHtml.current = bodyHtml // first load — the editor seeds with this
-    } else if (bodyHtml !== lastHtml.current && !pendingBody.current) {
-      lastHtml.current = bodyHtml
-      setEpoch((e) => e + 1)
-    }
-  }, [bodyHtml])
+  // Total time on the calendar — every block for this task summed
+  // (the task's own slot plus any extra blocks).
+  const calendarMinutes = useLiveQuery(() => window.api.calendarMinutes(itemId), [itemId]) ?? 0
 
   // Canvas title: local draft only while focused; idle, the input
   // mirrors item.title so renames made on the full canvas land here.
@@ -102,26 +56,22 @@ export function ItemDetail({
         ) : (
           !isPage && <span aria-hidden>{KIND_ICON[item.kind]}</span>
         )}
-        {isPage ? (
-          <input
-            className="peek-title"
-            value={titleDraft ?? item.title}
-            placeholder="Untitled canvas"
-            onFocus={() => setTitleDraft(item.title)}
-            onChange={(e) => setTitleDraft(e.target.value)}
-            onBlur={() => {
-              const t = titleDraft
-              setTitleDraft(null)
-              if (t !== null && t !== item.title)
-                mutate(() => window.api.updateItem(item.id, { title: t }))
-            }}
-            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-          />
-        ) : (
-          <h2 style={{ flex: 1, minWidth: 0, textDecoration: done ? 'line-through' : undefined }}>
-            {item.title || <span style={{ color: 'var(--text-faint)' }}>Untitled</span>}
-          </h2>
-        )}
+        {/* Every kind's title edits in place (it started pages-only). */}
+        <input
+          className="peek-title"
+          style={{ textDecoration: done ? 'line-through' : undefined }}
+          value={titleDraft ?? item.title}
+          placeholder={isPage ? 'Untitled canvas' : 'Untitled'}
+          onFocus={() => setTitleDraft(item.title)}
+          onChange={(e) => setTitleDraft(e.target.value)}
+          onBlur={() => {
+            const t = titleDraft
+            setTitleDraft(null)
+            if (t !== null && t !== item.title)
+              mutate(() => window.api.updateItem(item.id, { title: t }))
+          }}
+          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+        />
         <button
           className="btn ghost icon-btn"
           title={item.starred ? 'Unstar' : 'Star — pin it to the sidebar'}
@@ -151,6 +101,11 @@ export function ItemDetail({
           </span>
         )}
         {item.scheduledDate && <span className="pill">📅 {prettyDate(item.scheduledDate)}</span>}
+        {calendarMinutes > 0 && (
+          <span className="pill" title="Total time blocked on the calendar, all blocks summed">
+            ⏱ {durationLabel(calendarMinutes)} on calendar
+          </span>
+        )}
         {item.dueDate && <span className="pill">⏰ due {prettyDate(item.dueDate)}</span>}
         {item.completedAt && <span className="pill">✓ {prettyDate(item.completedAt.slice(0, 10))}</span>}
       </div>
@@ -161,16 +116,7 @@ export function ItemDetail({
         derived={extractLinksFromHtml(item.richContent ?? '')}
         onSave={(next) => mutate(() => window.api.updateItem(item.id, { links: next }))}
       />
-      {/* Toolbar-less: markdown shortcuts (`# `, `**`, `- `) format as
-          you type, and the placeholder replaces the old "no notes" dead-end. */}
-      <RichEditor
-        key={`${item.id}:${epoch}`}
-        variant="compact"
-        toolbar={false}
-        initialHtml={itemBodyHtml(item)}
-        placeholder="Notes — type **bold**, # headings, - lists…"
-        onChange={onBodyChange}
-      />
+      <ItemNotes item={item} />
     </div>
   )
 }

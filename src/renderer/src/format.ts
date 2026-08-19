@@ -78,6 +78,13 @@ export function ampm(time: string): string {
   return m ? `${hour}:${String(m).padStart(2, '0')} ${suffix}` : `${hour} ${suffix}`
 }
 
+/** '45m', '1h', '1h 15m' — totals of time blocked on the calendar. */
+export function durationLabel(mins: number): string {
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return h === 0 ? `${m}m` : m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
 export const KIND_ICON: Record<string, string> = {
   task: '✓', // quiet check — the green ✅ shouted from every list
   note: '📝',
