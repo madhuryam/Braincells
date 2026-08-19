@@ -30,6 +30,9 @@ export interface NewItem {
   scheduledDate?: string | null
   scheduledTime?: string | null
   timeEstimateMinutes?: number | null
+  /** Sort before everything instead of after — new unsectioned tasks
+   *  land at the top of their General group, not the bottom. */
+  atTop?: boolean
 }
 // completedAt rides along only to backdate a completion ("done on").
 export type ItemPatch = Partial<Omit<Item, 'id' | 'createdAt'>>
@@ -159,6 +162,7 @@ const api = {
     }
   ): Promise<LocalEvent | null> => invoke('localEvents:update', id, patch),
   deleteLocalEvent: (id: string): Promise<void> => invoke('localEvents:delete', id),
+  getLocalEvent: (id: string): Promise<LocalEvent | null> => invoke('localEvents:get', id),
   calendarInstanceCount: (id: string): Promise<number> => invoke('items:calendarInstanceCount', id),
   calendarMinutes: (id: string): Promise<number> => invoke('items:calendarMinutes', id),
   removeFromCalendar: (id: string): Promise<void> => invoke('items:removeFromCalendar', id),

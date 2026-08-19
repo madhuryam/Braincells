@@ -40,6 +40,60 @@ describe('projects', () => {
   })
 })
 
+describe('calendarMinutes', () => {
+  it('totals the task’s own slot plus every extra block, tracking edits', () => {
+    const t = store.createItem({
+      kind: 'task',
+      title: 'write the memo',
+      status: 'active',
+      scheduledDate: today,
+      scheduledTime: '10:00',
+      timeEstimateMinutes: 30
+    })
+    expect(store.calendarMinutes(t.id)).toBe(30)
+
+    // A second drop makes an extra block that points back at the task.
+    const extra = store.createLocalEvent({
+      title: 'write the memo',
+      date: today,
+      startTime: '15:45',
+      endTime: '16:15',
+      itemId: t.id
+    })
+    expect(store.calendarInstanceCount(t.id)).toBe(2)
+    expect(store.calendarMinutes(t.id)).toBe(60)
+    expect(store.getLocalEvent(extra.id)?.itemId).toBe(t.id)
+
+    // Every edit path keeps the total honest: resize the extra block…
+    store.updateLocalEvent(extra.id, { endTime: '16:45' })
+    expect(store.calendarMinutes(t.id)).toBe(90)
+    // …retime the task's own slot…
+    store.updateItem(t.id, { timeEstimateMinutes: 15 })
+    expect(store.calendarMinutes(t.id)).toBe(75)
+    // …remove the extra block…
+    store.deleteLocalEvent(extra.id)
+    expect(store.calendarMinutes(t.id)).toBe(15)
+    // …and off the calendar entirely.
+    store.removeFromCalendar(t.id)
+    expect(store.calendarMinutes(t.id)).toBe(0)
+    expect(store.calendarInstanceCount(t.id)).toBe(0)
+  })
+})
+
+describe('item creation order', () => {
+  it('atTop sorts a new task before everything; default appends', () => {
+    const a = store.createItem({ kind: 'task', title: 'a', status: 'active', scheduledDate: today })
+    const b = store.createItem({ kind: 'task', title: 'b', status: 'active', scheduledDate: today })
+    expect(store.tasksFor(today).map((t) => t.title)).toEqual(['a', 'b'])
+
+    // The General-group case: an unsectioned quick-add lands on top.
+    store.createItem({ kind: 'task', title: 'c', status: 'active', scheduledDate: today, atTop: true })
+    store.createItem({ kind: 'task', title: 'd', status: 'active', scheduledDate: today, atTop: true })
+    expect(store.tasksFor(today).map((t) => t.title)).toEqual(['d', 'c', 'a', 'b'])
+    expect(a.sortOrder).toBeLessThan(b.sortOrder)
+  })
+})
+
 describe('sections', () => {
   it('creates in order, renames, and reorders', () => {
     const p = store.createProject('Roadmap', '#e8590c')

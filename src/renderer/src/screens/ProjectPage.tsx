@@ -230,7 +230,9 @@ export function ProjectPage({ projectId }: { projectId: string }): React.JSX.Ele
   const add = async (): Promise<void> => {
     const title = draft.trim()
     if (!title) return
-    await mutate(() => window.api.createItem({ kind: 'task', title, status: 'active', projectId }))
+    await mutate(() =>
+      window.api.createItem({ kind: 'task', title, status: 'active', projectId, atTop: true })
+    )
     setDraft('')
   }
 

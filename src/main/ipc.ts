@@ -127,6 +127,7 @@ export function registerStoreIpc(store: Store): void {
   ipcMain.handle('items:calendarMinutes', (_e, id: string) => store.calendarMinutes(id))
   ipcMain.handle('items:removeFromCalendar', (_e, id: string) => store.removeFromCalendar(id))
   ipcMain.handle('localEvents:for', (_e, date: string) => store.localEventsFor(date))
+  ipcMain.handle('localEvents:get', (_e, id: string) => store.getLocalEvent(id))
 
   // Search
   ipcMain.handle('search:query', (_e, query: string) => store.search(query))

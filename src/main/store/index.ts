@@ -31,6 +31,9 @@ export interface NewItem {
   scheduledDate?: string | null
   scheduledTime?: string | null
   timeEstimateMinutes?: number | null
+  /** Sort before everything instead of after — new unsectioned tasks
+   *  land at the top of their General group, not the bottom. */
+  atTop?: boolean
 }
 
 /**
@@ -288,7 +291,7 @@ export class Store {
       scheduledTime: n.scheduledTime ?? null,
       timeEstimateMinutes: n.timeEstimateMinutes ?? null,
       links: [],
-      sortOrder: this.nextSortOrder(),
+      sortOrder: n.atTop ? this.topSortOrder() : this.nextSortOrder(),
       starred: false,
       createdAt: nowStamp(),
       updatedAt: nowStamp(),
@@ -323,6 +326,11 @@ export class Store {
 
   private nextSortOrder(): number {
     const r = this.db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM items').get() as any
+    return r.next
+  }
+
+  private topSortOrder(): number {
+    const r = this.db.prepare('SELECT COALESCE(MIN(sort_order), 1) - 1 AS next FROM items').get() as any
     return r.next
   }
 
@@ -1177,6 +1185,17 @@ export class Store {
 
   deleteLocalEvent(id: string): void {
     this.db.prepare('DELETE FROM local_events WHERE id = ?').run(id)
+  }
+
+  getLocalEvent(id: string): LocalEvent | null {
+    const r = this.db
+      .prepare(
+        `SELECT id, title, date, start_time AS startTime, end_time AS endTime,
+                project_id AS projectId, item_id AS itemId
+         FROM local_events WHERE id = ?`
+      )
+      .get(id)
+    return (r as LocalEvent) ?? null
   }
 
   /**
