@@ -1,4 +1,5 @@
 import { forwardRef, useImperativeHandle, useRef } from 'react'
+import { Extension } from '@tiptap/core'
 import { EditorContent, useEditor, useEditorState, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletList } from '@tiptap/extension-bullet-list'
@@ -119,6 +120,46 @@ const BulletListNoAutoformat = BulletList.extend({
   }
 })
 
+/**
+ * Tab stays IN the document: in a list it nests the item (⇧Tab lifts),
+ * in a code block it types a real tab, anywhere else it types an
+ * indent — it never walks focus off to the next control. Tables keep
+ * their own Tab (next cell): this extension steps aside there.
+ * The indent is non-breaking spaces because plain spaces collapse when
+ * the stored HTML is re-parsed on the next load.
+ */
+const TabIndent = Extension.create({
+  name: 'tabIndent',
+  addKeyboardShortcuts() {
+    return {
+      Tab: () => {
+        if (this.editor.isActive('table')) return false // table nav wins
+        if (this.editor.isActive('listItem')) {
+          // Nesting may be impossible (first item) — swallow the key anyway.
+          return this.editor.commands.sinkListItem('listItem') || true
+        }
+        if (this.editor.isActive('taskItem')) {
+          return this.editor.commands.sinkListItem('taskItem') || true
+        }
+        if (this.editor.isActive('codeBlock')) {
+          return this.editor.commands.insertContent('\t')
+        }
+        return this.editor.commands.insertContent('\u00A0\u00A0\u00A0\u00A0')
+      },
+      'Shift-Tab': () => {
+        if (this.editor.isActive('table')) return false
+        if (this.editor.isActive('listItem')) {
+          return this.editor.commands.liftListItem('listItem') || true
+        }
+        if (this.editor.isActive('taskItem')) {
+          return this.editor.commands.liftListItem('taskItem') || true
+        }
+        return true // swallowed — focus stays in the editor
+      }
+    }
+  }
+})
+
 const FONTS: Array<[label: string, css: string]> = [
   ['Default', ''],
   ['Serif', 'Georgia, serif'],
@@ -145,6 +186,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
       // base64 so the image lives in richContent (and thus SQLite);
       // block-level images read better in notes than inline ones.
       ImageExtension.configure({ allowBase64: true, inline: false }),
+      TabIndent,
       Placeholder.configure({ placeholder: placeholder ?? 'Write anything…' })
     ],
     content: initialHtml,

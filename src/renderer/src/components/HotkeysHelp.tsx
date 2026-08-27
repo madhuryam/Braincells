@@ -38,6 +38,26 @@ const SECTIONS: Array<{ title: string; rows: Row[] }> = [
       { keys: ['click'], what: '15-minute block on empty timeline' },
       { keys: ['drag'], what: 'Draw a longer block / move a task in' }
     ]
+  },
+  {
+    // TipTap's built-in formatting keys — they work in EVERY notes
+    // surface, including the toolbar-less canvas peek.
+    title: 'Formatting (notes & canvases)',
+    rows: [
+      { keys: ['⌘', 'B'], what: 'Bold' },
+      { keys: ['⌘', 'I'], what: 'Italic' },
+      { keys: ['⌘', 'U'], what: 'Underline' },
+      { keys: ['⌘', '⇧', 'S'], what: 'Strikethrough' },
+      { keys: ['⌘', 'E'], what: 'Inline code' },
+      { keys: ['⌘', '⌥', '1'], what: 'Heading 1 (…⌥2, ⌥3)' },
+      { keys: ['⌘', '⇧', '8'], what: 'Bullet list' },
+      { keys: ['⌘', '⇧', '7'], what: 'Numbered list' },
+      { keys: ['⌘', '⇧', '9'], what: 'Checkbox list' },
+      { keys: ['⌘', '⇧', 'B'], what: 'Quote' },
+      { keys: ['⌘', '⌥', 'C'], what: 'Code block' },
+      { keys: ['Tab'], what: 'Indent / nest list item (⇧Tab un-nests)' },
+      { keys: ['#', '**', '- [ ]'], what: 'Markdown formats as you type' }
+    ]
   }
 ]
 
