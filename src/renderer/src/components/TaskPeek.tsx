@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useLiveQuery, useMutate } from '../state/data'
-import { Checkbox } from './bits'
+import { CheckableInput, Checkbox } from './bits'
 import { ProjectPicker } from './ProjectPicker'
+import { SectionPicker } from './SectionPicker'
+import { createSubtask, SubtaskTree } from './SubtaskTree'
 import { LinkChips } from './LinkChips'
 import { extractLinksFromHtml } from '../links'
 import { ItemNotes } from './ItemNotes'
@@ -85,6 +87,10 @@ export function TaskPeek({
   // already says it all).
   const totalMinutes = useLiveQuery(() => window.api.calendarMinutes(itemId), [itemId]) ?? 0
   const instances = useLiveQuery(() => window.api.calendarInstanceCount(itemId), [itemId]) ?? 0
+  // The task's subtask tree — the SAME component the card editor
+  // renders (nested adds, deletes, renames, drag-reorder included).
+  const subtaskTree = useLiveQuery(() => window.api.subtaskTreeOf(itemId), [itemId]) ?? []
+  const [subDraft, setSubDraft] = useState('')
   const mutate = useMutate()
   // Title: local draft only while focused; idle, the input mirrors
   // item.title so renames made elsewhere land here (ItemDetail's rule).
@@ -127,6 +133,10 @@ export function TaskPeek({
     if (!isExtra) void patch({ scheduledTime: null, timeEstimateMinutes: null })
     else if (local) void mutate(() => window.api.deleteLocalEvent(local.id))
     onClose?.()
+  }
+
+  const addSubtask = async (title: string): Promise<void> => {
+    await mutate(() => createSubtask(item.id, item.projectId, title))
   }
 
   return (
@@ -232,6 +242,28 @@ export function TaskPeek({
       </div>
 
       <ProjectPicker value={item.projectId} onChange={(projectId) => patch({ projectId })} />
+      {/* Once a project is picked, its sections offer themselves —
+          file the task into a subsection, not just project General. */}
+      <SectionPicker
+        projectId={item.projectId}
+        value={item.sectionId}
+        onChange={(sectionId) => patch({ sectionId })}
+      />
+
+      {/* Subtasks — the exact tree the card editor shows: check off,
+          rename, drop (✕), nest deeper (＋), drag to reorder. */}
+      <SubtaskTree parent={item} tree={subtaskTree} />
+      <CheckableInput
+        placeholder="Add a subtask…"
+        value={subDraft}
+        onChange={(e) => setSubDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && subDraft.trim()) {
+            void addSubtask(subDraft.trim())
+            setSubDraft('')
+          }
+        }}
+      />
 
       {/* Attached URLs, same chips as a meeting's panel; hyperlinks in
           the notes ride along read-only. */}

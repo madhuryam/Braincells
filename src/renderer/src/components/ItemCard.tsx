@@ -1,6 +1,4 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 import { todayYmd, ymdAddDays } from '@shared/dates'
 import type { Item, ItemStatus } from '@shared/types'
 import { useData, useLiveQuery, useMutate } from '../state/data'
@@ -11,7 +9,7 @@ import { useMeetingPeek } from '../state/peek'
 import { useSelection } from '../state/selection'
 import { shortTitle, useUndo } from '../state/undo'
 import { Card } from './Card'
-import { usePendingOrder } from './dnd'
+import { createSubtask, SubtaskTree, visibleSubtasks } from './SubtaskTree'
 import { CheckableInput, Checkbox, ProjectDot } from './bits'
 import { ConfirmButton } from './ConfirmButton'
 import { LinkChips } from './LinkChips'
@@ -55,135 +53,12 @@ interface ItemCardProps {
    */
   open?: boolean
   onOpenChange?: (open: boolean) => void
-}
-
-/**
- * One row of the subtask tree: indented by depth, checkable in place,
- * with hover actions to add a nested subtask (＋) or drop it (✕).
- * The row is draggable like a task card — among its siblings to
- * reorder, or out onto the timeline to give it a time block.
- */
-function SubtaskRow({
-  sub,
-  depth,
-  sortableIds,
-  dimmed,
-  onToggle,
-  onDrop,
-  onRename,
-  onAddChild
-}: {
-  sub: Item
-  depth: number
-  /** Ids of the visible siblings at this row's level, in list order. */
-  sortableIds: string[]
-  /** This subtask has its own block on the calendar: the same
-   *  whisper-gray the parent's header wears — per row, never inherited. */
-  dimmed?: boolean
-  onToggle: (sub: Item) => void
-  onDrop: (sub: Item) => void
-  onRename: (sub: Item, title: string) => void
-  onAddChild: (parentId: string, title: string) => Promise<void>
-}): React.JSX.Element {
-  const [adding, setAdding] = useState(false)
-  const [draft, setDraft] = useState('')
-  const [editing, setEditing] = useState(false)
-  const [titleDraft, setTitleDraft] = useState('')
-  const indent = (depth - 1) * 22
-  // `subtask: true` keeps other cards from adopting this row's "home"
-  // (no date, parent's project) when they're dropped onto it.
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: sub.id,
-    data: { item: sub, sortableIds, subtask: true }
-  })
-  return (
-    <>
-      <div
-        ref={setNodeRef}
-        className={`subtask-row${dimmed ? ' timeblocked' : ''}`}
-        {...attributes}
-        {...listeners}
-        // The row sits inside a draggable card — stop the pointer-down
-        // here so grabbing a subtask never also lifts the whole parent.
-        onPointerDown={(e) => {
-          e.stopPropagation()
-          listeners?.onPointerDown?.(e)
-        }}
-        style={{
-          marginLeft: indent,
-          transform: CSS.Transform.toString(transform),
-          transition,
-          opacity: isDragging ? 0.35 : undefined
-        }}
-      >
-        <Checkbox checked={sub.status === 'done'} onToggle={() => onToggle(sub)} />
-        {editing ? (
-          <input
-            autoFocus
-            style={{ flex: 1, minWidth: 0, fontSize: 14.5, padding: '3px 8px' }}
-            value={titleDraft}
-            onChange={(e) => setTitleDraft(e.target.value)}
-            onBlur={() => {
-              setEditing(false)
-              const t = titleDraft.trim()
-              if (t && t !== sub.title) onRename(sub, t)
-            }}
-            onKeyDown={(e) => {
-              // Enter / ⌘⏎ / ⌃⏎ / ⇧⏎ all commit-and-exit; blur saves.
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-              if (e.key === 'Escape') {
-                e.stopPropagation() // don't also collapse the card
-                setTitleDraft(sub.title)
-                setEditing(false)
-              }
-            }}
-          />
-        ) : (
-          <button
-            className={`subtask-title ${sub.status === 'done' ? 'done' : ''}`}
-            style={{ textAlign: 'left', cursor: 'text' }}
-            title="Click to edit"
-            onClick={() => {
-              setTitleDraft(sub.title)
-              setEditing(true)
-            }}
-          >
-            {sub.title}
-          </button>
-        )}
-        <button
-          className="btn ghost small"
-          title="Add a subtask under this one"
-          onClick={() => setAdding(!adding)}
-        >
-          ＋
-        </button>
-        <button className="btn ghost small" title="Drop this subtask" onClick={() => onDrop(sub)}>
-          ✕
-        </button>
-      </div>
-      {adding && (
-        <div style={{ marginLeft: indent + 22 }}>
-          <CheckableInput
-            autoFocus
-            placeholder={`Add a subtask under “${shortTitle(sub.title)}”…`}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={async (e) => {
-              if (e.key === 'Escape') {
-                setAdding(false)
-                setDraft('')
-              }
-              if (e.key === 'Enter' && draft.trim()) {
-                await onAddChild(sub.id, draft.trim())
-                setDraft('')
-              }
-            }}
-          />
-        </div>
-      )}
-    </>
-  )
+  /**
+   * Done items render readable — no strikethrough, no fade. For record
+   * views (the weekly log) where the point is READING what got done,
+   * not visually dismissing it.
+   */
+  plainDone?: boolean
 }
 
 /**
@@ -201,7 +76,8 @@ export function ItemCard({
   checkboxSelects = false,
   unlinkId,
   open: controlledOpen,
-  onOpenChange
+  onOpenChange,
+  plainDone = false
 }: ItemCardProps): React.JSX.Element {
   // Controlled when the parent passes `open` (Inbox: one card at a
   // time); otherwise the app-wide editing slot decides — at most one
@@ -270,90 +146,19 @@ export function ItemCard({
     ) ?? []
 
   const subtasksDone = subtaskTree.filter(({ item: s }) => s.status === 'done').length
-  // While a subtask drag-reorder is persisting, the tree still carries
-  // the old DB order (same trap TaskGroups dodges) — re-rank the moved
-  // siblings and re-flatten depth-first so the drop doesn't snap back.
-  const pendingOrder = usePendingOrder()
-  let orderedTree = subtaskTree
-  if (pendingOrder && subtaskTree.some((r) => pendingOrder.includes(r.item.id))) {
-    const rank = new Map(pendingOrder.map((id, i) => [id, i]))
-    const kids = new Map<string, typeof subtaskTree>()
-    for (const row of subtaskTree) {
-      const list = kids.get(row.parentId) ?? []
-      list.push(row)
-      kids.set(row.parentId, list)
-    }
-    for (const list of kids.values()) {
-      const moved = list
-        .filter((r) => rank.has(r.item.id))
-        .sort((a, b) => rank.get(a.item.id)! - rank.get(b.item.id)!)
-      let n = 0
-      list.forEach((r, i) => {
-        if (rank.has(r.item.id)) list[i] = moved[n++]
-      })
-    }
-    orderedTree = []
-    const walk = (pid: string): void => {
-      for (const row of kids.get(pid) ?? []) {
-        orderedTree.push(row)
-        walk(row.item.id)
-      }
-    }
-    walk(item.id)
-  }
-  // A finished subtask leaves the card — it reappears in the day's
-  // Done section, grouped under this parent's name. Only a card that
-  // is itself done keeps that day's finished pieces: it IS the record.
-  const dayContext = contextDate ?? todayYmd()
-  const visibleTree = orderedTree.filter(({ item: s }) =>
-    s.status !== 'done'
-      ? true
-      : item.status === 'done' && (s.completedAt ?? '').slice(0, 10) === dayContext
-  )
-  // Visible siblings per parent: a drag-reorder stays within one
-  // nesting level (dropping on a row of another level is a no-op).
-  const siblingIds = new Map<string, string[]>()
-  for (const row of visibleTree) {
-    const list = siblingIds.get(row.parentId) ?? []
-    list.push(row.item.id)
-    siblingIds.set(row.parentId, list)
-  }
+  // What the tree below would actually show — the toggle only offers
+  // to expand when there ARE rows; with everything done (they live in
+  // the day's Done section) it becomes a plain "all done" note.
+  const visibleSubs = visibleSubtasks(item, subtaskTree, contextDate)
   const [subDraft, setSubDraft] = useState('')
+  // The ☑ pill folds the subtask tree away — the count stays visible,
+  // so a card with hidden subtasks still says it has them.
+  const [subsFolded, setSubsFolded] = useState(false)
   // The collapsed card's own ＋: add a subtask without opening the editor.
   const [quickSubOpen, setQuickSubOpen] = useState(false)
   const [quickSubDraft, setQuickSubDraft] = useState('')
   const addSubtask = async (parentId: string, title: string): Promise<void> => {
-    await mutate(async () => {
-      const sub = await window.api.createItem({
-        kind: 'task',
-        title,
-        status: 'active',
-        projectId: item.projectId
-      })
-      await window.api.linkItems(sub.id, parentId, 'subtask-of')
-    })
-  }
-  const toggleSubtask = (sub: Item): void => {
-    const wasDone = sub.status === 'done'
-    // Past-day views backdate, same as the card's own checkbox.
-    const backdate = !wasDone && contextDate && contextDate < todayYmd()
-    mutate(() =>
-      window.api.updateItem(sub.id, {
-        status: wasDone ? 'active' : 'done',
-        ...(backdate ? { completedAt: contextDate } : {})
-      })
-    )
-    if (!wasDone) {
-      pushUndo(`Completed “${shortTitle(sub.title)}”`, async () => {
-        await window.api.updateItem(sub.id, { status: 'active' })
-      })
-    }
-  }
-  const dropSubtask = (sub: Item): void => {
-    mutate(() => window.api.updateItem(sub.id, { status: 'dropped' }))
-    pushUndo(`Dropped “${shortTitle(sub.title)}”`, async () => {
-      await window.api.updateItem(sub.id, { status: 'active' })
-    })
+    await mutate(() => createSubtask(parentId, item.projectId, title))
   }
   const dropItem = (): void => {
     const prev = item.status
@@ -525,14 +330,16 @@ export function ItemCard({
       )}
     <Card
       accentColor={project?.color}
-      done={done}
+      done={done && !plainDone}
       faded={faded}
       className={[
         open ? 'open' : '',
         multiSelected ? 'multi-selected' : '',
         // Already placed on the timeline: a whisper of gray, only in
-        // day lists (contextDate) — "handled", not "dimmed out".
-        contextDate && item.scheduledTime ? 'timeblocked' : ''
+        // day lists (contextDate) — "handled", not "dimmed out". Never
+        // in record views (plainDone): the log grayed out every done
+        // task that had held a time block.
+        contextDate && item.scheduledTime && !plainDone ? 'timeblocked' : ''
       ]
         .filter(Boolean)
         .join(' ')}
@@ -698,10 +505,24 @@ export function ItemCard({
                   ⛔ blocked
                 </span>
               )}
-              {subtaskTree.length > 0 && (
-                <span className="pill subtask-count" title="subtasks">
-                  ☑ {subtasksDone}/{subtaskTree.length}
-                </span>
+              {/* Only when the tree below has rows to show — a task
+                whose subtasks are all done (they live in the day's
+                Done section) says nothing here. */}
+              {visibleSubs.length > 0 && (
+                // A toggle, not a badge (and deliberately not another
+                // pill): click to tuck the subtask tree away (and back)
+                // — the count keeps saying it's there.
+                <button
+                  className="subtask-toggle"
+                  title={subsFolded ? 'Show subtasks' : 'Hide subtasks'}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSubsFolded(!subsFolded)
+                  }}
+                >
+                  <span aria-hidden>{subsFolded ? '▸' : '▾'}</span>
+                  {subtasksDone}/{subtaskTree.length} subtasks
+                </button>
               )}
             </div>
           </div>
@@ -745,46 +566,24 @@ export function ItemCard({
           </div>
         )}
 
-        {/* The subtask tree is always visible — check things off right
-          from the list, no need to open the card. */}
-        {isCheckable && visibleTree.length > 0 && (
-          <SortableContext
-            items={visibleTree.map((t) => t.item.id)}
-            strategy={verticalListSortingStrategy}
-          >
-            <div className="subtasks" style={{ marginTop: 8 }}>
-              {visibleTree.map(({ item: sub, depth, parentId }) => (
-                <SubtaskRow
-                  key={sub.id}
-                  sub={sub}
-                  depth={depth}
-                  sortableIds={siblingIds.get(parentId) ?? []}
-                  dimmed={!!(contextDate && sub.scheduledTime)}
-                  onToggle={toggleSubtask}
-                  onDrop={dropSubtask}
-                  onRename={(s, title) => mutate(() => window.api.updateItem(s.id, { title }))}
-                  onAddChild={addSubtask}
-                />
-              ))}
-            </div>
-          </SortableContext>
+        {/* The subtask tree shows by default — check things off right
+          from the list, no need to open the card. The toggle above
+          folds it away when a big tree crowds the list. */}
+        {isCheckable && !subsFolded && (
+          <SubtaskTree
+            parent={item}
+            tree={subtaskTree}
+            contextDate={contextDate}
+            plainDone={plainDone}
+          />
         )}
 
         {open && (
           // Indented to the title's column (checkbox 19px + row gap 10px)
           // so the editor reads as one aligned block under the title.
           <div className="stack" style={{ marginTop: 12, marginLeft: 29 }}>
-            {/* One notes surface that formats as you type (no separate
-              preview): markdown shortcuts become real formatting. */}
-            <RichEditor
-              key={item.id}
-              ref={notesRef}
-              variant="compact"
-              initialHtml={itemBodyHtml(item)}
-              placeholder="Notes — type **bold**, # headings, - lists…"
-              onChange={onBodyChange}
-              onExit={closeCard}
-            />
+            {/* Subtask entry sits right under the subtask tree — new
+              rows appear where you're typing, not up past the notes. */}
             {isCheckable && (
               <div ref={subInputWrap}>
                 <CheckableInput
@@ -800,6 +599,17 @@ export function ItemCard({
                 />
               </div>
             )}
+            {/* One notes surface that formats as you type (no separate
+              preview): markdown shortcuts become real formatting. */}
+            <RichEditor
+              key={item.id}
+              ref={notesRef}
+              variant="compact"
+              initialHtml={itemBodyHtml(item)}
+              placeholder="Notes — type **bold**, # headings, - lists…"
+              onChange={onBodyChange}
+              onExit={closeCard}
+            />
             {/* One line: when to do it (the 5-day rolling window, or
               someday) and which project. With many projects the picker
               drops names to just the colored dots, and the whole tail
