@@ -21,6 +21,9 @@ export type CalendarMode = 'demo' | 'google' | 'off'
 const GOOGLE_CACHE_TTL_MS = 45_000
 // Bounds memory during long scrolling sessions (one entry per range).
 const GOOGLE_CACHE_MAX_ENTRIES = 30
+// After a failed fetch (offline, DNS down), don't hammer Google on
+// every query burst — wait this long before the next attempt.
+const GOOGLE_FAILURE_RETRY_MS = 15_000
 
 export function registerCalendarIpc(store: Store): void {
   const google = new GoogleCalendar(store)
@@ -32,7 +35,27 @@ export function registerCalendarIpc(store: Store): void {
     const key = `${startDate}..${endDate}`
     const hit = googleCache.get(key)
     if (hit && Date.now() - hit.fetchedAt < GOOGLE_CACHE_TTL_MS) return hit.events
-    const events = await google.eventsBetween(startDate, endDate)
+    let events: CalendarEvent[]
+    try {
+      events = await google.eventsBetween(startDate, endDate)
+    } catch (err) {
+      // Offline (ENOTFOUND) or Google unreachable: stay quiet and
+      // usable — show the last events this range had (or none), and
+      // let the next query retry after a pause instead of erroring
+      // out of the IPC handler on every burst.
+      console.warn(
+        `calendar: fetch failed for ${key} — serving last-known events.`,
+        err instanceof Error ? err.message : err
+      )
+      const stale = hit?.events ?? []
+      googleCache.delete(key)
+      googleCache.set(key, {
+        events: stale,
+        // Backdated so the entry re-expires after the retry pause.
+        fetchedAt: Date.now() - GOOGLE_CACHE_TTL_MS + GOOGLE_FAILURE_RETRY_MS
+      })
+      return stale
+    }
     googleCache.delete(key) // re-insert so Map order stays oldest-first
     googleCache.set(key, { events, fetchedAt: Date.now() })
     for (const oldest of googleCache.keys()) {
