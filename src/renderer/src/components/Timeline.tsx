@@ -9,6 +9,7 @@ import { ContextMenu } from './ContextMenu'
 import { useLabels, type Label } from '../state/labels'
 import { ProgressBar } from './bits'
 import { ProjectPicker } from './ProjectPicker'
+import { SectionPicker } from './SectionPicker'
 import { AllDayBar } from './AllDayBar'
 import { tipLines, useTip } from './Tooltip'
 import { ampm } from '../format'
@@ -102,6 +103,7 @@ export function Timeline({
   )
   const mutate = useMutate()
   const { openOverlay } = useNav()
+  const { pushUndo } = useUndo()
 
   // Re-render every minute so the "now" line crawls.
   const [now, setNow] = useState(() => new Date())
@@ -251,6 +253,14 @@ export function Timeline({
             endTime: toHHMM(next.end)
           })
         )
+        // An accidental resize walks back with ⌘Z — the block returns
+        // to exactly the times it had before the grab.
+        pushUndo(`Retimed “${shortTitle(l.title || 'Untitled block')}”`, async () => {
+          await window.api.updateLocalEvent(l.id, {
+            startTime: toHHMM(origStart),
+            endTime: toHHMM(origEnd)
+          })
+        })
       }
     }
     window.addEventListener('mousemove', onMove)
@@ -263,7 +273,7 @@ export function Timeline({
   // lives on the item as scheduledTime; duration as timeEstimateMinutes.
   const startTaskDrag = (
     e: React.MouseEvent,
-    t: { id: string; scheduledTime?: string | null; timeEstimateMinutes?: number | null },
+    t: { id: string; title: string; scheduledTime?: string | null; timeEstimateMinutes?: number | null },
     mode: 'move' | 'end'
   ): void => {
     if (e.button !== 0) return
@@ -309,6 +319,14 @@ export function Timeline({
           timeEstimateMinutes: next.end - next.start
         })
       )
+      // An accidental drag walks back with ⌘Z — the block returns to
+      // the slot and length it had before the grab.
+      pushUndo(`Moved “${shortTitle(t.title)}”`, async () => {
+        await window.api.updateItem(t.id, {
+          scheduledTime: toHHMM(origStart),
+          timeEstimateMinutes: dur
+        })
+      })
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -365,6 +383,13 @@ export function Timeline({
           endTime: toHHMM(next.end)
         })
       )
+      // Same safety net as the task's own block: ⌘Z restores the times.
+      pushUndo(`Moved “${shortTitle(l.title || 'Untitled block')}”`, async () => {
+        await window.api.updateLocalEvent(l.id, {
+          startTime: toHHMM(origStart),
+          endTime: toHHMM(origEnd)
+        })
+      })
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -658,9 +683,27 @@ function TaskBlockMenu({
   const mutate = useMutate()
   const { pushUndo } = useUndo()
   const [dropArmed, setDropArmed] = useState(false)
+  const done = task.status === 'done'
 
   return (
     <ContextMenu x={x} y={y} onClose={onClose}>
+      <button
+        className="btn ghost small"
+        style={{ justifyContent: 'flex-start' }}
+        title={done ? 'Put it back on the list' : 'Check it off right from the timeline'}
+        onClick={() => {
+          onClose()
+          const prev = task.status
+          void mutate(() => window.api.updateItem(task.id, { status: done ? 'active' : 'done' }))
+          if (!done) {
+            pushUndo(`Completed “${shortTitle(task.title)}”`, async () => {
+              await window.api.updateItem(task.id, { status: prev })
+            })
+          }
+        }}
+      >
+        {done ? '↩ Mark not done' : '✓ Mark done'}
+      </button>
       <button
         className="btn ghost small"
         style={{ justifyContent: 'flex-start' }}
@@ -834,6 +877,7 @@ function TaskDraftEditor({
   const [start, setStart] = useState(initialStart)
   const [end, setEnd] = useState(initialEnd)
   const [projectId, setProjectId] = useState<string | null>(null)
+  const [sectionId, setSectionId] = useState<string | null>(null)
   const idRef = useRef<string | null>(null)
   const creating = useRef<Promise<void> | null>(null)
 
@@ -842,12 +886,14 @@ function TaskDraftEditor({
     start?: string
     end?: string
     projectId?: string | null
+    sectionId?: string | null
   }): void => {
     const f = {
       title: patch.title ?? title,
       start: patch.start ?? start,
       end: patch.end ?? end,
-      projectId: patch.projectId !== undefined ? patch.projectId : projectId
+      projectId: patch.projectId !== undefined ? patch.projectId : projectId,
+      sectionId: patch.sectionId !== undefined ? patch.sectionId : sectionId
     }
     // The drawn range maps onto the task's block fields: a start time
     // plus a duration — the same pair a drag-in drop sets. Hand-typed
@@ -859,6 +905,7 @@ function TaskDraftEditor({
         await window.api.updateItem(idRef.current, {
           title: f.title,
           projectId: f.projectId,
+          sectionId: f.sectionId,
           scheduledTime: f.start,
           timeEstimateMinutes: duration
         })
@@ -869,6 +916,7 @@ function TaskDraftEditor({
             title: f.title,
             status: 'active',
             projectId: f.projectId,
+            sectionId: f.sectionId,
             scheduledDate: date,
             scheduledTime: f.start,
             timeEstimateMinutes: duration,
@@ -941,7 +989,17 @@ function TaskDraftEditor({
         value={projectId}
         onChange={(v) => {
           setProjectId(v)
-          save({ projectId: v })
+          // A section belongs to its project — a new project resets it.
+          setSectionId(null)
+          save({ projectId: v, sectionId: null })
+        }}
+      />
+      <SectionPicker
+        projectId={projectId}
+        value={sectionId}
+        onChange={(v) => {
+          setSectionId(v)
+          save({ sectionId: v })
         }}
       />
     </div>

@@ -17,6 +17,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { createContext, useContext, useState, type ReactNode } from 'react'
 import type { CalendarEvent, Item } from '@shared/types'
 import { useMutate } from '../state/data'
+import { shortTitle, useUndo } from '../state/undo'
 import { preferEventPrep } from './dndCollision'
 
 /*
@@ -216,6 +217,7 @@ class CardPointerSensor extends PointerSensor {
 
 export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element {
   const mutate = useMutate()
+  const { pushUndo } = useUndo()
   const [dragged, setDragged] = useState<Item | null>(null)
   const [sortableDrag, setSortableDrag] = useState(false)
   const [pendingOrder, setPendingOrder] = useState<string[] | null>(null)
@@ -286,8 +288,8 @@ export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element
       // and the drop creates an ADDITIONAL block — a local event that
       // points back at the task, sized by its time estimate.
       if (item.scheduledTime && item.scheduledDate === date) {
-        mutate(() =>
-          window.api.createLocalEvent({
+        mutate(async () => {
+          const created = await window.api.createLocalEvent({
             title: item.title,
             date,
             startTime: time,
@@ -295,8 +297,20 @@ export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element
             projectId: item.projectId,
             itemId: item.id
           })
-        )
+          // An accidental drop walks back with ⌘Z: the extra block goes
+          // away again; the task's own slot was never touched.
+          pushUndo(`Blocked “${shortTitle(item.title)}”`, async () => {
+            await window.api.deleteLocalEvent(created.id)
+          })
+        })
         return
+      }
+      // Everything the drop overwrites, so ⌘Z can put it back exactly.
+      const prevSlot = {
+        scheduledDate: item.scheduledDate,
+        scheduledTime: item.scheduledTime,
+        timeEstimateMinutes: item.timeEstimateMinutes,
+        status: item.status
       }
       mutate(() =>
         window.api.updateItem(item.id, {
@@ -310,6 +324,9 @@ export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element
           ...(item.status === 'inbox' ? { status: 'active' as const } : {})
         })
       )
+      pushUndo(`Blocked “${shortTitle(item.title)}”`, async () => {
+        await window.api.updateItem(item.id, prevSlot)
+      })
       return
     }
 
