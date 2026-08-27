@@ -61,6 +61,10 @@ app.whenReady().then(() => {
 
   store = new Store(join(app.getPath('userData'), 'braincells.sqlite3'))
 
+  // Age out the canvas trash: deleted canvases stay restorable
+  // (Settings → Deleted canvases) for 30 days, then really go.
+  store.purgeDroppedPages()
+
   // Auto carry-over: unfinished tasks roll forward to today on their
   // own — at launch, then again the moment the date flips while the
   // app stays open (the minute tick catches midnight and wake-from-

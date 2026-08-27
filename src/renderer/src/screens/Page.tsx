@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useData, useLiveQuery, useMutate } from '../state/data'
 import { useNav } from '../state/nav'
+import { shortTitle, useUndo } from '../state/undo'
 import { ConfirmButton } from '../components/ConfirmButton'
 import { RichEditor } from '../components/RichEditor'
-import { BackButton, ProjectDot } from '../components/bits'
-import { projectLabel } from '../format'
+import { BackButton } from '../components/bits'
+import { ProjectPicker } from '../components/ProjectPicker'
 
 /**
  * A Page: a full-fledged writing surface attached to a project — the
@@ -14,9 +15,10 @@ import { projectLabel } from '../format'
  */
 export function Page({ itemId }: { itemId: string }): React.JSX.Element {
   const item = useLiveQuery(() => window.api.getItem(itemId), [itemId])
-  const { projects, bump } = useData()
+  const { bump } = useData()
   const { closeOverlay } = useNav()
   const mutate = useMutate()
+  const { pushUndo } = useUndo()
 
   // Title: seeded once per page, saved on blur (same pattern as cards).
   const [title, setTitle] = useState('')
@@ -54,7 +56,6 @@ export function Page({ itemId }: { itemId: string }): React.JSX.Element {
   )
 
   if (!item) return <div className="canvas">Canvas not found.</div>
-  const project = projects.find((p) => p.id === item.projectId)
 
   return (
     <div className="canvas">
@@ -71,11 +72,12 @@ export function Page({ itemId }: { itemId: string }): React.JSX.Element {
           onBlur={() => title !== item.title && mutate(() => window.api.updateItem(itemId, { title }))}
           onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
         />
-        {project && (
-          <span className="pill">
-            <ProjectDot color={project.color} /> {projectLabel(project)}
-          </span>
-        )}
+        {/* The project pill is live: click it to refile the canvas,
+            same picker the task peek uses. */}
+        <ProjectPicker
+          value={item.projectId}
+          onChange={(projectId) => mutate(() => window.api.updateItem(itemId, { projectId }))}
+        />
         <button
           className="btn ghost icon-btn"
           title={item.starred ? 'Unstar' : 'Star — pin it to the sidebar'}
@@ -84,14 +86,19 @@ export function Page({ itemId }: { itemId: string }): React.JSX.Element {
           {item.starred ? '⭐' : '☆'}
         </button>
         {/* Deleting lives ONLY here, on the full view — where you can
-            see everything you're about to lose. Two-step, never one click. */}
+            see everything you're about to lose. Two-step, never one
+            click — and soft: the canvas moves to the trash (Settings →
+            Deleted canvases) for 30 days, undoable on the spot. */}
         <ConfirmButton
           label="🗑"
           confirmLabel="delete canvas?"
-          title="Delete this canvas"
+          title="Delete this canvas (kept 30 days in Settings → Deleted canvases)"
           className="btn ghost"
           onConfirm={async () => {
-            await mutate(() => window.api.deleteItem(itemId))
+            await mutate(() => window.api.updateItem(itemId, { status: 'dropped' }))
+            pushUndo(`Deleted canvas “${shortTitle(item.title)}”`, async () => {
+              await window.api.updateItem(itemId, { status: 'active' })
+            })
             closeOverlay()
           }}
         />

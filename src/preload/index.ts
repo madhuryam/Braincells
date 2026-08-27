@@ -78,6 +78,8 @@ const api = {
   deleteItem: (id: string): Promise<void> => invoke('items:delete', id),
   reorderItems: (ids: string[]): Promise<void> => invoke('items:reorder', ids),
   starredItems: (): Promise<Item[]> => invoke('items:starred'),
+  /** The canvas trash: dropped pages awaiting restore or the 30-day purge. */
+  droppedPages: (): Promise<Item[]> => invoke('items:droppedPages'),
   subtasksOf: (parentId: string): Promise<Item[]> => invoke('items:subtasks', parentId),
   subtaskTreeOf: (
     rootId: string

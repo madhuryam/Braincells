@@ -5,6 +5,7 @@ import { todayYmd, ymdAddDays } from '@shared/dates'
 import { useData, useLiveQuery, useMutate } from '../state/data'
 import { useNav } from '../state/nav'
 import { MeetingPeekProvider } from '../state/peek'
+import { shortTitle, useUndo } from '../state/undo'
 import { DetailPanel } from '../components/DetailPanel'
 import { ItemCard } from '../components/ItemCard'
 import { ItemDetail } from '../components/ItemDetail'
@@ -43,6 +44,7 @@ function CanvasCard({
   onDeleted: () => void
 }): React.JSX.Element {
   const mutate = useMutate()
+  const { pushUndo } = useUndo()
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   // "Delete canvas": always two-step — first click arms, second deletes.
   const [deleteArmed, setDeleteArmed] = useState(false)
@@ -132,7 +134,14 @@ function CanvasCard({
                 return
               }
               setMenu(null)
-              void mutate(() => window.api.deleteItem(item.id)).then(onDeleted)
+              // Soft: to the trash (Settings → Deleted canvases) for 30
+              // days, with an immediate undo — never a hard delete.
+              void mutate(() => window.api.updateItem(item.id, { status: 'dropped' })).then(
+                onDeleted
+              )
+              pushUndo(`Deleted canvas “${shortTitle(item.title)}”`, async () => {
+                await window.api.updateItem(item.id, { status: 'active' })
+              })
             }}
           >
             {deleteArmed ? '🗑 Confirm Delete' : '🗑 Delete'}

@@ -41,6 +41,7 @@ export function registerStoreIpc(store: Store): void {
   ipcMain.handle('items:delete', (_e, id: string) => store.deleteItem(id))
   ipcMain.handle('items:reorder', (_e, ids: string[]) => store.reorderItems(ids))
   ipcMain.handle('items:starred', () => store.starredItems())
+  ipcMain.handle('items:droppedPages', () => store.droppedPages())
   ipcMain.handle('items:subtasks', (_e, parentId: string) => store.subtasksOf(parentId))
   ipcMain.handle('items:subtaskTree', (_e, rootId: string) => store.subtaskTreeOf(rootId))
   ipcMain.handle('items:ancestors', (_e, itemId: string) => store.ancestorsOf(itemId))

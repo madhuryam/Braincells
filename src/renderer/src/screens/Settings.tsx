@@ -422,6 +422,8 @@ export function Settings(): React.JSX.Element {
           {backupNote && <p style={{ margin: 0, color: 'var(--ok)' }}>{backupNote}</p>}
         </Card>
 
+        <DeletedCanvasesCard />
+
         <Card className="stack">
           <h2>Start over</h2>
           <p style={{ margin: 0, color: 'var(--text-soft)' }}>
@@ -440,6 +442,53 @@ export function Settings(): React.JSX.Element {
         </Card>
       </div>
     </div>
+  )
+}
+
+/**
+ * Settings → Deleted canvases: the trash. A deleted canvas rests here,
+ * restorable with one click, for 30 days — then the launch-time purge
+ * lets it go for real. Hidden entirely while the trash is empty.
+ */
+function DeletedCanvasesCard(): React.JSX.Element | null {
+  const mutate = useMutate()
+  const { projects } = useData()
+  const pages = useLiveQuery(() => window.api.droppedPages(), []) ?? []
+  if (pages.length === 0) return null
+
+  return (
+    <Card className="stack">
+      <h2>Deleted canvases</h2>
+      <p style={{ margin: 0, color: 'var(--text-soft)' }}>
+        Deleted canvases wait here for 30 days before they're gone for good. Restore puts one
+        back on its project.
+      </p>
+      <div className="stack" style={{ gap: 6 }}>
+        {pages.map((p) => {
+          const project = projects.find((pr) => pr.id === p.projectId)
+          const deletedOn = (p.updatedAt ?? p.createdAt).slice(0, 10)
+          return (
+            <div key={p.id} className="row">
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                📄 {p.title || 'Untitled canvas'}
+                {project && (
+                  <span style={{ color: 'var(--text-faint)' }}> · {project.name}</span>
+                )}
+              </span>
+              <span style={{ fontSize: 13, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
+                deleted {deletedOn}
+              </span>
+              <button
+                className="btn small"
+                onClick={() => mutate(() => window.api.updateItem(p.id, { status: 'active' }))}
+              >
+                ↩ Restore
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </Card>
   )
 }
 

@@ -878,3 +878,36 @@ describe('completed subtasks grouping', () => {
     expect(store.completedSubtasksOn(today).every((g) => g.rootHasOpenSubtasks)).toBe(true)
   })
 })
+
+describe('canvas trash (dropped pages)', () => {
+  it('lists dropped pages and restores never touches other kinds', () => {
+    const page = store.createItem({ kind: 'page', title: 'design notes', status: 'active' })
+    const task = store.createItem({ kind: 'task', title: 'not a canvas', status: 'active' })
+    store.updateItem(page.id, { status: 'dropped' })
+    store.updateItem(task.id, { status: 'dropped' })
+
+    const trash = store.droppedPages()
+    expect(trash.map((p) => p.id)).toEqual([page.id])
+
+    store.updateItem(page.id, { status: 'active' })
+    expect(store.droppedPages()).toHaveLength(0)
+    expect(store.getItem(page.id)?.status).toBe('active')
+  })
+
+  it('purges only pages dropped more than N days ago', () => {
+    const oldPage = store.createItem({ kind: 'page', title: 'stale', status: 'active' })
+    const newPage = store.createItem({ kind: 'page', title: 'fresh', status: 'active' })
+    const oldTask = store.createItem({ kind: 'task', title: 'dropped task', status: 'active' })
+    store.updateItem(oldPage.id, { status: 'dropped' })
+    store.updateItem(newPage.id, { status: 'dropped' })
+    store.updateItem(oldTask.id, { status: 'dropped' })
+    // Backdate the old page's (and task's) last touch past the window.
+    const stale = `${ymdAddDays(today, -31)} 09:00:00`
+    store.db.prepare('UPDATE items SET updated_at = ? WHERE id IN (?, ?)').run(stale, oldPage.id, oldTask.id)
+
+    expect(store.purgeDroppedPages(30, today)).toBe(1)
+    expect(store.getItem(oldPage.id)).toBeNull() // aged out
+    expect(store.getItem(newPage.id)?.status).toBe('dropped') // still restorable
+    expect(store.getItem(oldTask.id)?.status).toBe('dropped') // tasks never purge
+  })
+})

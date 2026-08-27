@@ -1,7 +1,7 @@
 import DatabaseConstructor, { type Database } from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { migrate } from './migrations'
-import { nowStamp, ymdAddDays } from '../../shared/dates'
+import { nowStamp, todayYmd, ymdAddDays } from '../../shared/dates'
 import type {
   CalendarEvent,
   Item,
@@ -736,6 +736,38 @@ export class Store {
       )
       .all(itemId)
     return rows.map(rowToItem)
+  }
+
+  /**
+   * The canvas trash: dropped pages, freshest deletion first (dropping
+   * stamps updated_at). They sit here — restorable from Settings —
+   * until purgeDroppedPages() ages them out.
+   */
+  droppedPages(): Item[] {
+    return this.db
+      .prepare(
+        `SELECT ${ITEM_COLS} FROM items
+         WHERE kind = 'page' AND status = 'dropped'
+         ORDER BY updated_at DESC, created_at DESC`
+      )
+      .all()
+      .map(rowToItem)
+  }
+
+  /**
+   * Empty the old end of the canvas trash: dropped pages whose last
+   * touch (the deletion) is more than `days` ago are gone for good.
+   * Runs at every launch. Returns how many were purged.
+   */
+  purgeDroppedPages(days = 30, today = todayYmd()): number {
+    const cutoff = `${ymdAddDays(today, -days)} 00:00:00`
+    return this.db
+      .prepare(
+        `DELETE FROM items
+         WHERE kind = 'page' AND status = 'dropped'
+           AND COALESCE(updated_at, created_at) < ?`
+      )
+      .run(cutoff).changes
   }
 
   /** Quick-access favorites for the sidebar. */
