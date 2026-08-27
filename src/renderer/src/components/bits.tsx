@@ -2,16 +2,26 @@ import type { ReactNode } from 'react'
 import { useNav } from '../state/nav'
 
 /**
- * "⬅ back" in a screen header. Renders nothing on the first screen of
- * the session, so Today usually stays clean.
+ * "⬅ back" (and "➡ forward" once you've gone back) in a screen header.
+ * Renders nothing with no history in either direction, so Today
+ * usually stays clean.
  */
 export function BackButton(): React.JSX.Element | null {
-  const { back, canGoBack } = useNav()
-  if (!canGoBack) return null
+  const { back, forward, canGoBack, canGoForward } = useNav()
+  if (!canGoBack && !canGoForward) return null
   return (
-    <button className="btn ghost icon-btn back-btn" title="Back" onClick={back}>
-      ⬅
-    </button>
+    <>
+      {canGoBack && (
+        <button className="btn ghost icon-btn back-btn" title="Back" onClick={back}>
+          ⬅
+        </button>
+      )}
+      {canGoForward && (
+        <button className="btn ghost icon-btn back-btn" title="Forward" onClick={forward}>
+          ➡
+        </button>
+      )}
+    </>
   )
 }
 
