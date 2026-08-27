@@ -12,13 +12,19 @@ import { DetailPanel } from '../components/DetailPanel'
 import { DoneList } from '../components/DoneList'
 import { Meeting } from './Meeting'
 import { BackButton, EmptyState } from '../components/bits'
-import { ampm, longDate } from '../format'
+import { ampm, longDate, mmdd } from '../format'
 
 /**
  * The weekly log (SPEC §4.5): an automatic answer to "what did I even
  * do this week" — one collapsible block per day (journal, meetings,
- * done), a week at a time. Clicking a meeting or item peeks it in a
- * right-hand detail panel instead of leaving the screen.
+ * done), a week at a time, or the whole week rolled into one cohesive
+ * list. Clicking a meeting or item peeks it in a right-hand detail
+ * panel instead of leaving the screen.
+ *
+ * This is a RECORD view, so done tasks render readable (no
+ * strikethrough), and the header offers: by-day vs by-week, tasks-only
+ * (hide projects that only show up because of meetings), and a
+ * by-section split. All three remember themselves across sessions.
  */
 
 /** What the detail panel is currently showing. (Done items expand in
@@ -37,6 +43,25 @@ function monthDay(date: string): string {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+/** A small on/off pill for the header's view options. */
+function TogglePill({
+  on,
+  label,
+  title,
+  onToggle
+}: {
+  on: boolean
+  label: string
+  title: string
+  onToggle: () => void
+}): React.JSX.Element {
+  return (
+    <button className={`btn small ${on ? 'primary' : 'ghost'}`} title={title} onClick={onToggle}>
+      {label}
+    </button>
+  )
+}
+
 export function DailyLog(): React.JSX.Element {
   const today = todayYmd()
   const [weekStart, setWeekStart] = useState(weekStartOf(today))
@@ -44,6 +69,28 @@ export function DailyLog(): React.JSX.Element {
   const days = Array.from({ length: 7 }, (_, i) => ymdAddDays(weekStart, i))
   const events =
     useLiveQuery(() => window.api.calendarEvents(weekStart, weekEnd), [weekStart]) ?? []
+
+  // View options, remembered across sessions (settings, not just state).
+  const [view, setView] = useState<'day' | 'week'>('day')
+  const [tasksOnly, setTasksOnly] = useState(false)
+  const [bySection, setBySection] = useState(false)
+  useEffect(() => {
+    window.api.getSetting<'day' | 'week'>('logView').then((v) => v === 'week' && setView('week'))
+    window.api.getSetting<boolean>('logTasksOnly').then((v) => v === true && setTasksOnly(true))
+    window.api.getSetting<boolean>('logBySection').then((v) => v === true && setBySection(true))
+  }, [])
+  const saveView = (v: 'day' | 'week'): void => {
+    setView(v)
+    void window.api.setSetting('logView', v)
+  }
+  const saveTasksOnly = (v: boolean): void => {
+    setTasksOnly(v)
+    void window.api.setSetting('logTasksOnly', v)
+  }
+  const saveBySection = (v: boolean): void => {
+    setBySection(v)
+    void window.api.setSetting('logBySection', v)
+  }
 
   // Today starts open; every other day is a header until clicked.
   const [openDays, setOpenDays] = useState<Set<string>>(new Set([today]))
@@ -85,15 +132,42 @@ export function DailyLog(): React.JSX.Element {
           >
             ➡
           </button>
-          <button
-            className="btn ghost icon-btn tooltip"
-            data-tooltip={allOpen ? 'Collapse all days' : 'Expand all days'}
-            onClick={() => setOpenDays(allOpen ? new Set() : new Set(days))}
-          >
-            <FontAwesomeIcon icon={allOpen ? faSquareCaretUp : faSquareCaretDown} />
-          </button>
+          {view === 'day' && (
+            <button
+              className="btn ghost icon-btn tooltip"
+              data-tooltip={allOpen ? 'Collapse all days' : 'Expand all days'}
+              onClick={() => setOpenDays(allOpen ? new Set() : new Set(days))}
+            >
+              <FontAwesomeIcon icon={allOpen ? faSquareCaretUp : faSquareCaretDown} />
+            </button>
+          )}
         </span>
       </header>
+
+      {/* How to read the week: broken down by day, or one cohesive
+          list; tasks-only and by-section shape both. */}
+      <div className="row" style={{ margin: '0 0 14px', gap: 6 }}>
+        <TogglePill on={view === 'day'} label="by day" title="One block per day" onToggle={() => saveView('day')} />
+        <TogglePill
+          on={view === 'week'}
+          label="by week"
+          title="Everything completed this week, in one list"
+          onToggle={() => saveView('week')}
+        />
+        <span style={{ width: 10 }} aria-hidden />
+        <TogglePill
+          on={tasksOnly}
+          label="tasks only"
+          title="Hide projects that only show up because of meetings"
+          onToggle={() => saveTasksOnly(!tasksOnly)}
+        />
+        <TogglePill
+          on={bySection}
+          label="by section"
+          title="Split each project's done tasks under its section names"
+          onToggle={() => saveBySection(!bySection)}
+        />
+      </div>
 
       {/* A task's 📅 meeting chip peeks that meeting in the right-hand
           panel — the same slot day-block clicks use. */}
@@ -102,17 +176,29 @@ export function DailyLog(): React.JSX.Element {
       >
       <div className="log-split">
         <div className="log-main">
-          {days.map((d) => (
-            <DayBlock
-              key={d}
-              date={d}
-              isToday={d === today}
-              open={openDays.has(d)}
-              onToggle={() => toggleDay(d)}
-              events={events.filter((e) => e.date === d)}
+          {view === 'day' ? (
+            days.map((d) => (
+              <DayBlock
+                key={d}
+                date={d}
+                isToday={d === today}
+                open={openDays.has(d)}
+                onToggle={() => toggleDay(d)}
+                events={events.filter((e) => e.date === d)}
+                onPeek={setDetail}
+                tasksOnly={tasksOnly}
+                bySection={bySection}
+              />
+            ))
+          ) : (
+            <WeekBlock
+              days={days}
+              events={events}
               onPeek={setDetail}
+              tasksOnly={tasksOnly}
+              bySection={bySection}
             />
-          ))}
+          )}
         </div>
 
         {detail && (
@@ -149,7 +235,9 @@ function DayBlock({
   open,
   onToggle,
   events,
-  onPeek
+  onPeek,
+  tasksOnly,
+  bySection
 }: {
   date: string
   isToday: boolean
@@ -157,6 +245,8 @@ function DayBlock({
   onToggle: () => void
   events: CalendarEvent[]
   onPeek: (d: Detail) => void
+  tasksOnly: boolean
+  bySection: boolean
 }): React.JSX.Element {
   const completed = useLiveQuery(() => window.api.completedOn(date), [date]) ?? []
 
@@ -185,8 +275,15 @@ function DayBlock({
               <span className="section-sublabel">Done</span>
               {/* The same element as Today's Done section — full cards,
                   subtask lineage grouped under each parent, checkboxes
-                  uncheckable in place. */}
-              <DoneList date={date} />
+                  uncheckable in place. Plain (no strikethrough): this
+                  is a record to read, not a list to dismiss. */}
+              <DoneList
+                date={date}
+                plain
+                collapsible
+                hideMeetingOnly={tasksOnly}
+                bySection={bySection}
+              />
             </div>
 
             <div className="stack">
@@ -213,6 +310,67 @@ function DayBlock({
           </div>
         </div>
       )}
+    </section>
+  )
+}
+
+/**
+ * The whole week as one cohesive record: everything completed across
+ * the seven days in a single grouped list (each project once), the
+ * week's meetings beside it in day order.
+ */
+function WeekBlock({
+  days,
+  events,
+  onPeek,
+  tasksOnly,
+  bySection
+}: {
+  days: string[]
+  events: CalendarEvent[]
+  onPeek: (d: Detail) => void
+  tasksOnly: boolean
+  bySection: boolean
+}): React.JSX.Element {
+  const timed = events.filter((ev) => ev.startTime)
+  return (
+    <section>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+        <div className="stack">
+          <span className="section-sublabel">Done this week</span>
+          <DoneList
+            dates={days}
+            plain
+            collapsible
+            hideMeetingOnly={tasksOnly}
+            bySection={bySection}
+          />
+        </div>
+
+        <div className="stack">
+          <span className="section-sublabel">Meetings</span>
+          <div className="item-list">
+            {timed.map((ev) => (
+              <Card
+                key={ev.eventKey}
+                interactive
+                onClick={() =>
+                  onPeek({ kind: 'meeting', eventKey: ev.eventKey, title: ev.title, date: ev.date })
+                }
+              >
+                <div className="row">
+                  <span className="meeting-date">{mmdd(ev.date)}</span>
+                  <span className="meeting-time">{ampm(ev.startTime!)}</span>
+                  <span className="card-title">{ev.title}</span>
+                </div>
+              </Card>
+            ))}
+            {timed.length === 0 && (
+              <span style={{ color: 'var(--text-faint)', fontSize: 14 }}>no meetings this week</span>
+            )}
+          </div>
+        </div>
+      </div>
     </section>
   )
 }

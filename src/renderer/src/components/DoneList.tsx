@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
-import type { Item, Project } from '@shared/types'
+import type { Item, Project, Section } from '@shared/types'
 import { useData, useLiveQuery, useMutate } from '../state/data'
 import { Card } from './Card'
 import { ItemCard } from './ItemCard'
@@ -13,28 +13,65 @@ function toMin(t: string): number {
 const fmtMins = (m: number): string =>
   m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}` : `${m}m`
 
+interface DoneListProps {
+  /** The single day to show (Today's Done section, a log day block). */
+  date?: string
+  /** Several days aggregated into one cohesive list (the weekly log's
+   *  by-week view). Must be contiguous and ascending. Wins over date. */
+  dates?: string[]
+  /** Done items render readable — no strikethrough, no fade — for
+   *  record views where the point is reading what got done. */
+  plain?: boolean
+  /** Hide project blocks that only appear because meetings were filed
+   *  to them — no task completed, nothing to report. */
+  hideMeetingOnly?: boolean
+  /** Split each project's done tasks under its section names instead
+   *  of one flat list per project. */
+  bySection?: boolean
+  /** Project headers fold/unfold on click. */
+  collapsible?: boolean
+}
+
 /**
- * Everything finished on one day: standalone done items as full cards,
- * plus each still-in-progress parent's finished subtasks grouped under
- * the parent's name. One element shared by Today's "Done" section and
- * the weekly log, so "what got done" reads the same everywhere —
- * lineage kept, checkboxes uncheckable in place if one was a misclick.
+ * Everything finished on one day (or a span of days): standalone done
+ * items as full cards, plus each still-in-progress parent's finished
+ * subtasks grouped under the parent's name. One element shared by
+ * Today's "Done" section and the weekly log, so "what got done" reads
+ * the same everywhere — lineage kept, checkboxes uncheckable in place
+ * if one was a misclick.
  *
  * Same shape as the day's task list: one block per project (sidebar
  * order, 'No project' last), the header names the project, so cards
  * skip the project pill. If nothing has a project, the list is flat.
  */
-export function DoneList({ date }: { date: string }): React.JSX.Element {
+export function DoneList({
+  date,
+  dates,
+  plain = false,
+  hideMeetingOnly = false,
+  bySection = false,
+  collapsible = false
+}: DoneListProps): React.JSX.Element {
   const { projects } = useData()
-  const done = useLiveQuery(() => window.api.completedOn(date), [date]) ?? []
-  // Subtasks finished this day show grouped under their parent's name,
-  // not as orphan cards.
-  const doneSubs = useLiveQuery(() => window.api.completedSubtasksOn(date), [date]) ?? []
+  const days = dates ?? (date ? [date] : [])
+  const daysKey = days.join(',')
+  const done =
+    useLiveQuery(
+      async () => (await Promise.all(days.map((d) => window.api.completedOn(d)))).flat(),
+      [daysKey]
+    ) ?? []
+  // Subtasks finished on these days show grouped under their parent's
+  // name, not as orphan cards.
+  const doneSubs =
+    useLiveQuery(
+      async () => (await Promise.all(days.map((d) => window.api.completedSubtasksOn(d)))).flat(),
+      [daysKey]
+    ) ?? []
   const doneSubIds = new Set(doneSubs.map((d) => d.item.id))
   const standalone = done.filter((i) => !doneSubIds.has(i.id))
-  // A parent finished this day shows its subtasks on its own done card
-  // — repeating them as a group would show the same work twice. Every
-  // other parent gets a group here: this is now the ONLY place a
+  // A parent finished in this span shows its subtasks on its own done
+  // card — repeating them as a group would show the same work twice.
+  // Every other parent gets a group here: this is now the ONLY place a
   // finished subtask appears (the active parent's card hides them).
   const doneIds = new Set(done.map((i) => i.id))
   const roots = [
@@ -45,11 +82,18 @@ export function DoneList({ date }: { date: string }): React.JSX.Element {
     ).entries()
   ]
 
-  // How the day's hours split per project: the summed estimates of the
-  // day's done work, plus every meeting filed into (or auto-labeled to)
-  // that project. Meetings come from the live calendar; their project
-  // comes from the meetings table.
-  const events = useLiveQuery(() => window.api.calendarEvents(date, date), [date]) ?? []
+  // How the span's hours split per project: the summed estimates of the
+  // done work, plus every meeting filed into (or auto-labeled to) that
+  // project. Meetings come from the live calendar; their project comes
+  // from the meetings table.
+  const events =
+    useLiveQuery(
+      () =>
+        days.length > 0
+          ? window.api.calendarEvents(days[0], days[days.length - 1])
+          : Promise.resolve([]),
+      [daysKey]
+    ) ?? []
   const timedEvents = events.filter((e) => e.startTime && e.endTime)
   const eventKeys = timedEvents.map((e) => e.eventKey).join(',')
   const meetingRows =
@@ -73,10 +117,28 @@ export function DoneList({ date }: { date: string }): React.JSX.Element {
     subMinsByRoot.set(d.rootId, (subMinsByRoot.get(d.rootId) ?? 0) + (d.item.timeEstimateMinutes ?? 0))
   }
 
+  // Section names, fetched only when the by-section split is on.
+  const sectionsByProject = useLiveQuery(async () => {
+    if (!bySection) return null
+    const lists = await Promise.all(projects.map((p) => window.api.listSections(p.id)))
+    return new Map<string, Section[]>(projects.map((p, i) => [p.id, lists[i]]))
+  }, [bySection, projects])
+
+  // Folded project blocks (when collapsible) — per-mount, starts open.
+  const [folded, setFolded] = useState<Set<string>>(new Set())
+  const toggleFold = (key: string): void =>
+    setFolded((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+
   // One block per project; subtask groups file under their PARENT's
   // project — the finished piece belongs where the work lives. A
-  // project with only meeting time still gets a block: the day was
-  // spent on it even if no task got checked off.
+  // project with only meeting time still gets a block (the day was
+  // spent on it even if no task got checked off) — unless the caller
+  // asked for tasks only.
   const blocks: Array<{
     key: string
     project: Project | null
@@ -95,6 +157,7 @@ export function DoneList({ date }: { date: string }): React.JSX.Element {
       items.reduce((sum, i) => sum + (i.timeEstimateMinutes ?? 0), 0) +
       own.reduce((sum, r) => sum + (subMinsByRoot.get(r.rootId) ?? 0), 0)
     const meetMins = meetingMins.get(key) ?? 0
+    if (hideMeetingOnly && items.length === 0 && own.length === 0) return
     if (items.length > 0 || own.length > 0 || meetMins > 0) {
       blocks.push({ key, project, items, roots: own, taskMins, meetMins })
     }
@@ -120,52 +183,102 @@ export function DoneList({ date }: { date: string }): React.JSX.Element {
 
   const showHeaders = blocks.some((b) => b.project !== null)
 
+  // The day a card's checkbox works against: in a multi-day span, each
+  // item answers with its own completion day.
+  const contextDateOf = (item: Item): string =>
+    (item.completedAt ?? '').slice(0, 10) || days[days.length - 1]
+
+  const cardsFor = (items: Item[]): React.JSX.Element => (
+    <AnimatePresence initial={false}>
+      {items.map((item) => (
+        // contextDate: ticking a leftover subtask inside a done card on
+        // a past day's view logs it on THAT day, like every other
+        // checkbox on the page.
+        <ItemCard
+          key={item.id}
+          item={item}
+          showProject={false}
+          showDate={false}
+          contextDate={contextDateOf(item)}
+          plainDone={plain}
+        />
+      ))}
+    </AnimatePresence>
+  )
+
   return (
     <>
-      {blocks.map((block) => (
-        <div key={block.key} className="task-group">
-          {showHeaders && (
-            <div className="task-group-header static">
-              {block.project ? (
-                <>
-                  <ProjectDot color={block.project.color} /> {block.project.name}
-                </>
-              ) : (
-                'No project'
-              )}
-              {(block.taskMins > 0 || block.meetMins > 0) && (
-                <TimeSplit taskMins={block.taskMins} meetMins={block.meetMins} />
-              )}
-            </div>
-          )}
-          <div className={`item-list ${showHeaders ? 'task-group-indent' : ''}`}>
-            <AnimatePresence initial={false}>
-              {block.items.map((item) => (
-                // contextDate: ticking a leftover subtask inside a done
-                // card on a past day's view logs it on THAT day, like
-                // every other checkbox on the page.
-                <ItemCard
-                  key={item.id}
-                  item={item}
-                  showProject={false}
-                  showDate={false}
-                  contextDate={date}
-                />
-              ))}
-            </AnimatePresence>
-            {block.roots.map(({ rootId, rootTitle }) => (
-              <DoneSubtaskGroup key={rootId} rootId={rootId} rootTitle={rootTitle} date={date} />
-            ))}
+      {blocks.map((block) => {
+        const isFolded = collapsible && folded.has(block.key)
+        // The by-section split: one slice per section that has done
+        // work, unfiled tasks under the automatic "General" name.
+        const sections = block.project ? (sectionsByProject?.get(block.project.id) ?? []) : []
+        const knownSections = new Set(sections.map((s) => s.id))
+        const slices: Array<{ name: string; items: Item[] }> = []
+        if (bySection && block.project && sections.length > 0) {
+          for (const s of sections) {
+            const inSection = block.items.filter((i) => i.sectionId === s.id)
+            if (inSection.length > 0) slices.push({ name: s.name, items: inSection })
+          }
+          const unfiled = block.items.filter((i) => !i.sectionId || !knownSections.has(i.sectionId))
+          if (unfiled.length > 0) slices.push({ name: 'General', items: unfiled })
+        }
+        return (
+          <div key={block.key} className="task-group">
+            {showHeaders && (
+              <div
+                className="task-group-header static"
+                role={collapsible ? 'button' : undefined}
+                style={collapsible ? { cursor: 'pointer' } : undefined}
+                onClick={collapsible ? () => toggleFold(block.key) : undefined}
+              >
+                {collapsible && <span aria-hidden>{isFolded ? '▸' : '▾'}</span>}
+                {block.project ? (
+                  <>
+                    <ProjectDot color={block.project.color} /> {block.project.name}
+                  </>
+                ) : (
+                  'No project'
+                )}
+                {isFolded && <span className="pill">{block.items.length + block.roots.length}</span>}
+                {(block.taskMins > 0 || block.meetMins > 0) && (
+                  <TimeSplit taskMins={block.taskMins} meetMins={block.meetMins} />
+                )}
+              </div>
+            )}
+            {!isFolded && (
+              <div className={`item-list ${showHeaders ? 'task-group-indent' : ''}`}>
+                {slices.length > 0 ? (
+                  slices.map((slice) => (
+                    <div key={slice.name}>
+                      <div className="section-sublabel">{slice.name}</div>
+                      {cardsFor(slice.items)}
+                    </div>
+                  ))
+                ) : (
+                  cardsFor(block.items)
+                )}
+                {block.roots.map(({ rootId, rootTitle }) => (
+                  <DoneSubtaskGroup
+                    key={rootId}
+                    rootId={rootId}
+                    rootTitle={rootTitle}
+                    dates={days}
+                    plain={plain}
+                  />
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        )
+      })}
     </>
   )
 }
 
 /**
- * Where the day's hours went for one project: one combined figure at
- * rest (done-task time + meeting time); a click flips it to the
+ * Where the hours went for one project: one combined figure at rest
+ * (done-task time + meeting time); a click flips it to the
  * task-vs-meeting breakdown and back.
  */
 function TimeSplit({ taskMins, meetMins }: { taskMins: number; meetMins: number }): React.JSX.Element {
@@ -181,7 +294,10 @@ function TimeSplit({ taskMins, meetMins }: { taskMins: number; meetMins: number 
         whiteSpace: 'nowrap'
       }}
       title={split ? 'Show total' : 'Show tasks vs meetings'}
-      onClick={() => setSplit(!split)}
+      onClick={(e) => {
+        e.stopPropagation() // never also folds the block
+        setSplit(!split)
+      }}
     >
       {split
         ? [
@@ -196,25 +312,29 @@ function TimeSplit({ taskMins, meetMins }: { taskMins: number; meetMins: number 
 }
 
 /**
- * One parent task's subtasks finished on `date`, in true tree order.
- * Unfinished intermediate levels are skipped, so each row indents
- * under its nearest *shown* ancestor — a lone grandchild sits at the
- * first level rather than appearing to belong to an unrelated sibling.
+ * One parent task's subtasks finished on the shown days, in true tree
+ * order. Unfinished intermediate levels are skipped, so each row
+ * indents under its nearest *shown* ancestor — a lone grandchild sits
+ * at the first level rather than appearing to belong to an unrelated
+ * sibling.
  */
 function DoneSubtaskGroup({
   rootId,
   rootTitle,
-  date
+  dates,
+  plain = false
 }: {
   rootId: string
   rootTitle: string
-  date: string
+  dates: string[]
+  plain?: boolean
 }): React.JSX.Element {
   const tree = useLiveQuery(() => window.api.subtaskTreeOf(rootId), [rootId]) ?? []
   const mutate = useMutate()
 
+  const dateSet = new Set(dates)
   const shown = tree.filter(
-    ({ item }) => item.status === 'done' && (item.completedAt ?? '').slice(0, 10) === date
+    ({ item }) => item.status === 'done' && dateSet.has((item.completedAt ?? '').slice(0, 10))
   )
   const shownIds = new Set(shown.map((s) => s.item.id))
   const parentOf = new Map(tree.map((t) => [t.item.id, t.parentId]))
@@ -232,7 +352,9 @@ function DoneSubtaskGroup({
       <div className="row">
         <span aria-hidden style={{ color: 'var(--text-faint)', fontWeight: 700 }}>✓</span>
         <span className="card-title">{rootTitle}</span>
-        <span className="pill" style={{ marginLeft: 'auto' }}>
+        <span
+          style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 650, color: 'var(--text-faint)' }}
+        >
           subtasks
         </span>
       </div>
@@ -243,7 +365,7 @@ function DoneSubtaskGroup({
               checked
               onToggle={() => mutate(() => window.api.updateItem(sub.id, { status: 'active' }))}
             />
-            <span className="subtask-title done">{sub.title}</span>
+            <span className={`subtask-title${plain ? '' : ' done'}`}>{sub.title}</span>
           </div>
         ))}
       </div>
