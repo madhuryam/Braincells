@@ -7,9 +7,24 @@
 
 /* ── Sidebar ─────────────────────────────────────────────────────── */
 
-.sidebar {
+/* The slot reserves the sidebar's place in the layout: full width when
+   pinned, rail width in auto mode — where the expanded sidebar floats
+   OVER the screen (absolute + z-index) so hovering never reflows it. */
+.sidebar-slot {
   width: 224px;
   flex-shrink: 0;
+  position: relative;
+  transition: width 0.18s ease;
+}
+
+.sidebar-slot.auto {
+  width: 64px;
+}
+
+.sidebar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 100%;
   background: var(--sidebar-bg);
   display: flex;
   flex-direction: column;
@@ -18,11 +33,30 @@
   padding-top: 44px;
   -webkit-app-region: drag;
   /* the empty parts drag the window */
-  transition: width 0.18s ease;
+  transition: width 0.18s ease, box-shadow 0.18s ease;
+  /* Clip the width animation, but never the bottom of a long list —
+     the footer must stay reachable. */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-.sidebar.collapsed {
-  width: 64px;
+.sidebar.hover-open {
+  width: 224px;
+  z-index: 40;
+  box-shadow: var(--shadow-lift);
+}
+
+/* In auto mode the sidebar must receive every mouse move — a window
+   drag region swallows pointer events in the gaps between buttons,
+   which read as constant mouseleave/enter (the open/close flicker).
+   Window-dragging from the sidebar only works while pinned. */
+.sidebar-slot.auto .sidebar {
+  -webkit-app-region: no-drag;
+}
+
+/* The active pin reads "held open". */
+.sidebar .pin-on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .sidebar button,

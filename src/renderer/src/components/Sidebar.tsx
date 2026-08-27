@@ -1,10 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useDndContext } from '@dnd-kit/core'
 import { todayYmd } from '@shared/dates'
-import { useData, useLiveQuery } from '../state/data'
+import { useData, useLiveQuery, useMutate } from '../state/data'
 import { useNav, type View } from '../state/nav'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { projectLabel } from '../format'
 import { ProjectDot } from './bits'
+import { ContextMenu } from './ContextMenu'
 import { DropZone, SortableProjectRow } from './dnd'
 import { HotkeysHelp, isTyping } from './HotkeysHelp'
 
@@ -71,13 +73,115 @@ function NavItem({
   )
 }
 
+/**
+ * Right-click on a project: its canvases, right here — click one and
+ * it floats over whatever you're looking at (the same pop-open view
+ * the ↗ buttons use), no trip through the project page.
+ */
+function ProjectCanvasMenu({
+  projectId,
+  x,
+  y,
+  onClose
+}: {
+  projectId: string
+  x: number
+  y: number
+  onClose: () => void
+}): React.JSX.Element {
+  const { openOverlay } = useNav()
+  const mutate = useMutate()
+  const items = useLiveQuery(() => window.api.projectItems(projectId), [projectId]) ?? []
+  const pages = items
+    .filter((i) => i.kind === 'page' && (i.status === 'active' || i.status === 'inbox'))
+    .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))
+
+  const newCanvas = async (): Promise<void> => {
+    onClose()
+    let created: { id: string } | undefined
+    await mutate(async () => {
+      created = await window.api.createItem({ kind: 'page', title: '', status: 'active', projectId })
+    })
+    if (created) openOverlay({ name: 'page', itemId: created.id })
+  }
+
+  return (
+    <ContextMenu x={x} y={y} onClose={onClose}>
+      <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        {pages.map((p) => (
+          <button
+            key={p.id}
+            className="btn ghost small"
+            style={{ justifyContent: 'flex-start', flexShrink: 0 }}
+            onClick={() => {
+              onClose()
+              openOverlay({ name: 'page', itemId: p.id })
+            }}
+          >
+            📄 {p.title || 'Untitled canvas'}
+          </button>
+        ))}
+      </div>
+      {pages.length === 0 && (
+        <span style={{ padding: '4px 8px', fontSize: 13.5, color: 'var(--text-faint)' }}>
+          no canvases yet
+        </span>
+      )}
+      <button
+        className="btn ghost small"
+        style={{ justifyContent: 'flex-start', borderTop: '1px solid var(--border)', borderRadius: 0 }}
+        onClick={() => void newCanvas()}
+      >
+        ＋ new canvas
+      </button>
+    </ContextMenu>
+  )
+}
+
 export function Sidebar(): React.JSX.Element {
   // `dark` comes from context state (not the DOM attribute) so the
   // toggle button always re-renders in step with the actual theme.
   const { projects, dark, toggleDark } = useData()
   const { view, navigate } = useNav()
-  const [collapsed, setCollapsed] = useState(false)
+  // Auto-collapse: the sidebar rests as a 64px rail and expands while
+  // the pointer is over it — unless pinned open (📌, remembered).
+  // null = the setting hasn't loaded; treat as expanded to avoid a
+  // collapse-then-expand flash on launch.
+  const [pinned, setPinned] = useState<boolean | null>(null)
+  const [hovered, setHovered] = useState(false)
+  // Collapse on a short delay, not instantly: a momentary event gap
+  // (crossing a scrollbar, a portal, a re-render) must not flap the
+  // sidebar shut mid-reach.
+  const leaveTimer = useRef<number | undefined>(undefined)
+  const onEnter = (): void => {
+    window.clearTimeout(leaveTimer.current)
+    setHovered(true)
+  }
+  const onLeave = (): void => {
+    window.clearTimeout(leaveTimer.current)
+    leaveTimer.current = window.setTimeout(() => setHovered(false), 250)
+  }
   const [keysOpen, setKeysOpen] = useState(false)
+  // Right-click on a project: its canvases in a context menu. While
+  // it's up, the sidebar holds itself open even if the pointer leaves.
+  const [canvasMenu, setCanvasMenu] = useState<{ projectId: string; x: number; y: number } | null>(
+    null
+  )
+
+  useEffect(() => {
+    window.api.getSetting<boolean>('sidebarPinned').then((v) => setPinned(v === true))
+  }, [])
+  const setPin = (v: boolean): void => {
+    setPinned(v)
+    void window.api.setSetting('sidebarPinned', v)
+  }
+
+  // Mid-drag, pointer capture swallows hover — hold the sidebar open
+  // for the whole drag so cards can still be filed onto projects.
+  const { active: dragActive } = useDndContext()
+
+  const expanded = pinned !== false || hovered || canvasMenu !== null || dragActive !== null
+  const collapsed = !expanded
 
   // "?" opens the shortcut cheat-sheet from anywhere (unless typing).
   // Lives here because the sidebar is mounted on every screen.
@@ -92,8 +196,21 @@ export function Sidebar(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  const projectContextMenu = (projectId: string) => (e: React.MouseEvent) => {
+    e.preventDefault()
+    setCanvasMenu({ projectId, x: e.clientX, y: e.clientY })
+  }
+
   return (
-    <nav className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+    // The slot holds the sidebar's place in the layout; in auto mode
+    // it stays rail-width and the expanded sidebar floats OVER the
+    // screen, so hovering never reflows the page.
+    <div
+      className={`sidebar-slot ${pinned === false ? 'auto' : 'pinned'}`}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+    >
+      <nav className={`sidebar ${collapsed ? 'collapsed' : ''} ${pinned === false && expanded ? 'hover-open' : ''}`}>
       <div className="sidebar-brand">{collapsed ? 'b.' : 'braincells'}</div>
       {!collapsed && <Clock />}
 
@@ -120,7 +237,7 @@ export function Sidebar(): React.JSX.Element {
         isActive={view.name === 'projects'}
       />
       {/* Drag a project to reorder; drop a card on one to file it there
-          (SPEC §7 drag & drop). */}
+          (SPEC §7 drag & drop); right-click for its canvases. */}
       {!collapsed && (
         <SortableContext items={projects.map((p) => p.id)} strategy={verticalListSortingStrategy}>
           {projects.map((p) => (
@@ -128,6 +245,7 @@ export function Sidebar(): React.JSX.Element {
               <button
                 className={`nav-item nav-item-nested ${view.name === 'project' && view.projectId === p.id ? 'active' : ''}`}
                 onClick={() => navigate({ name: 'project', projectId: p.id })}
+                onContextMenu={projectContextMenu(p.id)}
               >
                 <ProjectDot color={p.color} />
                 {/* Names too long for this rail fall back to the
@@ -150,13 +268,14 @@ export function Sidebar(): React.JSX.Element {
             className={`nav-item nav-item-dot ${view.name === 'project' && view.projectId === p.id ? 'active' : ''}`}
             title={p.name}
             onClick={() => navigate({ name: 'project', projectId: p.id })}
+            onContextMenu={projectContextMenu(p.id)}
           >
             <ProjectDot color={p.color} />
           </button>
         ))}
 
-      {/* When collapsed, only the expand button remains — the footer
-          used to overflow the 64px rail, leaving it unclickable. */}
+      {/* When collapsed, only the pin remains — the footer used to
+          overflow the 64px rail, leaving it unclickable. */}
       <div className="sidebar-footer">
         {!collapsed && (
           <>
@@ -184,16 +303,29 @@ export function Sidebar(): React.JSX.Element {
           </>
         )}
         <button
-          className="btn ghost icon-btn"
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          onClick={() => setCollapsed(!collapsed)}
+          className={`btn ghost icon-btn ${pinned ? 'pin-on' : ''}`}
+          title={
+            pinned
+              ? 'Unpin — the sidebar auto-collapses and expands on hover'
+              : 'Pin the sidebar open'
+          }
+          onClick={() => setPin(!(pinned ?? false))}
           style={collapsed ? undefined : { marginLeft: 'auto' }}
         >
-          {collapsed ? '»' : '«'}
+          {pinned ? '📌' : '📍'}
         </button>
       </div>
 
       <HotkeysHelp open={keysOpen} onClose={() => setKeysOpen(false)} />
-    </nav>
+      {canvasMenu && (
+        <ProjectCanvasMenu
+          projectId={canvasMenu.projectId}
+          x={canvasMenu.x}
+          y={canvasMenu.y}
+          onClose={() => setCanvasMenu(null)}
+        />
+      )}
+      </nav>
+    </div>
   )
 }
