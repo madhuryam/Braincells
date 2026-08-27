@@ -5,8 +5,10 @@ import { useLiveQuery, useMutate } from '../state/data'
 import { useEditing } from '../state/editing'
 import { useNav } from '../state/nav'
 import { MeetingPeekProvider } from '../state/peek'
+import { ContextMenu } from '../components/ContextMenu'
 import { DetailPanel } from '../components/DetailPanel'
 import { DoneList } from '../components/DoneList'
+import { MiniCalendar } from '../components/MiniCalendar'
 import { TaskPeek } from '../components/TaskPeek'
 import { Meeting } from './Meeting'
 import { ItemCard } from '../components/ItemCard'
@@ -14,7 +16,7 @@ import { TaskGroups } from '../components/TaskGroups'
 import { ProjectPicker } from '../components/ProjectPicker'
 import { DraggableCard, DropZone } from '../components/dnd'
 import { Timeline } from '../components/Timeline'
-import { CheckableInput, EmptyState } from '../components/bits'
+import { BackButton, CheckableInput, EmptyState } from '../components/bits'
 import { longDate, rollingDays, type RollingDay } from '../format'
 
 /** 'August 5' — the weekday already leads the header, so no repeat. */
@@ -65,6 +67,15 @@ export function Today(): React.JSX.Element {
   const mutate = useMutate()
   const { openOverlay } = useNav()
   const [taskDraft, setTaskDraft] = useState('')
+  // Right-click on the header: an in-app month calendar at the cursor
+  // to jump straight to any date (no arrow-by-arrow paging). Built-in,
+  // not the native picker — showPicker() only sporadically honors a
+  // right-click's activation, so it worked "sometimes".
+  const [jumpMenu, setJumpMenu] = useState<{ x: number; y: number } | null>(null)
+  const openDateJump = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    setJumpMenu({ x: e.clientX, y: e.clientY })
+  }
   // Everything shows by default — "Show fewer" is the opt-in trim,
   // not the other way around.
   const [showAll, setShowAll] = useState(true)
@@ -142,13 +153,14 @@ export function Today(): React.JSX.Element {
 
   return (
     <div className="canvas">
-      <header className="canvas-header">
+      <header className="canvas-header" onContextMenu={openDateJump}>
+        <BackButton />
         {/* One continuous phrase in header type. Its min-width fits the
             longest date, so the nav buttons beside it never move. */}
         <h1 style={{ minWidth: 330 }}>
           {date === today ? `Today · ${monthDay(date)}` : longDate(date)}
         </h1>
-        <span className="row">
+        <span className="row" title="Right-click to jump to a date">
           <button className="btn ghost icon-btn" title="Previous day" onClick={() => setDate(ymdAddDays(date, -1))}>
             ‹
           </button>
@@ -160,6 +172,18 @@ export function Today(): React.JSX.Element {
           </button>
         </span>
       </header>
+
+      {jumpMenu && (
+        <ContextMenu x={jumpMenu.x} y={jumpMenu.y} onClose={() => setJumpMenu(null)}>
+          <MiniCalendar
+            value={date}
+            onPick={(d) => {
+              setDate(d)
+              setJumpMenu(null)
+            }}
+          />
+        </ContextMenu>
+      )}
 
       {/* Cards deep in the lists can peek a linked meeting here beside
           the schedule — same panel a clicked calendar event uses. */}

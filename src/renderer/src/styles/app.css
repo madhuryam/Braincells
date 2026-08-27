@@ -59,6 +59,60 @@
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
+/* ── Mini month calendar (right-click date jump) ─────────────────── */
+
+.mini-cal {
+  padding: 6px;
+  min-width: 232px;
+}
+
+.mini-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  font-size: 13.5px;
+  margin-bottom: 6px;
+}
+
+.mini-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.mini-cal-dow {
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-faint);
+  padding: 2px 0;
+}
+
+.mini-cal-day {
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.mini-cal-day:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.mini-cal-day.today {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.mini-cal-day.selected {
+  background: var(--accent);
+  color: #fff;
+}
+
 .sidebar button,
 .sidebar a {
   -webkit-app-region: no-drag;
