@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import type { AttachedLink } from '@shared/types'
 import { hostLabel, normalizeUrl } from '../links'
+import { linkIcon } from '../linkIcons'
 
 /**
- * Attached links, shown by NAME (the 🔗 marks them as links; the URL
- * itself stays in the tooltip). One shared element for meetings and
- * tasks — the owner just says how to save.
+ * Attached links as soft rounded cards: the service's icon (Slack,
+ * Drive, Jira… — see linkIcons.ts; 🔗 for everything else), the name,
+ * and the hostname whispered after it. One shared element for
+ * meetings and tasks — the owner just says how to save.
  *
  * Editing: each chip's ✎ opens the inline editor (name + URL), and
  * deleting lives ONLY there — a bare ✕ on the chip made removal one
@@ -50,7 +52,13 @@ export function LinkChips({
       {links.map((l, i) => (
         <span key={`${l.url}-${i}`} className="url-chip" title={l.url}>
           <a href={l.url} target="_blank" rel="noreferrer">
-            🔗 {l.title || hostLabel(l.url)}
+            <LinkGlyph url={l.url} />
+            <span className="url-chip-name">{l.title || hostLabel(l.url)}</span>
+            {/* The hostname rides along only when it adds something —
+                repeating the name as the subtitle said nothing. */}
+            {Boolean(l.title) && l.title !== hostLabel(l.url) && (
+              <span className="url-chip-host">{hostLabel(l.url)}</span>
+            )}
           </a>
           <button
             className="url-chip-edit"
@@ -64,7 +72,8 @@ export function LinkChips({
       {fromNotes.map((l) => (
         <span key={l.url} className="url-chip from-notes" title={`${l.url} — linked in the notes`}>
           <a href={l.url} target="_blank" rel="noreferrer">
-            🔗 {l.title}
+            <LinkGlyph url={l.url} />
+            <span className="url-chip-name">{l.title}</span>
           </a>
         </span>
       ))}
@@ -85,6 +94,18 @@ export function LinkChips({
         </button>
       )}
     </div>
+  )
+}
+
+/** The service's icon when the URL is recognized, a quiet 🔗 otherwise. */
+function LinkGlyph({ url }: { url: string }): React.JSX.Element {
+  const icon = linkIcon(url)
+  return icon ? (
+    <img className="url-chip-icon" src={icon} alt="" aria-hidden />
+  ) : (
+    <span className="url-chip-icon generic" aria-hidden>
+      🔗
+    </span>
   )
 }
 

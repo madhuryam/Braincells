@@ -2405,6 +2405,7 @@ kbd.key {
   line-height: 1;
   flex-shrink: 0;
 }
+
 .join-call:hover {
   filter: brightness(1.15);
   transform: scale(1.08);
@@ -2418,30 +2419,75 @@ kbd.key {
   max-height: 180px;
   overflow-y: auto;
 }
+
 .meeting-description a {
   color: var(--accent);
 }
 
+/* A link is a little card, not a pill: the service's icon leading, the
+   name in real weight, the hostname whispered after — roomy enough to
+   actually notice among the controls around it. */
 .url-chip {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 2px 4px 2px 9px;
-  font-size: 13px;
-  background: var(--bg-card);
+  gap: 5px;
+  padding: 9px 11px 9px 12px;
+  font-size: 14px;
+  background: color-mix(in srgb, var(--bg-sunken) 55%, var(--bg-card));
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 10px;
+  transition: box-shadow 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+
+.url-chip:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: var(--shadow-card);
+  transform: translateY(-1px);
 }
 
 .url-chip a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
   font-weight: 600;
-  color: var(--text-soft);
+  color: var(--text);
   text-decoration: none;
 }
 
-.url-chip a:hover {
+.url-chip a:hover .url-chip-name {
   color: var(--accent);
-  text-decoration: underline;
+}
+
+.url-chip-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.url-chip-icon.generic {
+  font-size: 14.5px;
+  width: auto;
+  line-height: 1;
+}
+
+.url-chip-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The hostname tags along quietly — skipped when it IS the name. */
+.url-chip-host {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-faint);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The ✎ whispers until the chip is hovered — same idea as card rows.
@@ -2465,7 +2511,7 @@ kbd.key {
    the notes to change it, so no ✎ here. */
 .url-chip.from-notes {
   border-style: dashed;
-  padding-right: 9px;
+  padding-right: 11px;
 }
 
 .link-editor {
