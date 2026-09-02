@@ -10,6 +10,7 @@ import { Placeholder } from '@tiptap/extensions'
 import { TaskItem } from '@tiptap/extension-task-item'
 import { TaskList } from '@tiptap/extension-task-list'
 import type { EditorView } from '@tiptap/pm/view'
+import { tipLines, useTip } from './Tooltip'
 
 /**
  * The rich text editor for Pages — a Slack-canvas-style writing
@@ -229,6 +230,41 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
   )
 })
 
+/**
+ * One toolbar button: the fast viewport tooltip (not the ~1s native
+ * `title`) names the action on its first line and shows the keyboard
+ * shortcut, when the action has one, on the second.
+ * mousedown + preventDefault keeps the text selection while clicking.
+ */
+function RtBtn({
+  label,
+  title,
+  shortcut,
+  run,
+  active
+}: {
+  label: string
+  title: string
+  shortcut?: string
+  run: () => void
+  active: boolean
+}): React.JSX.Element {
+  const tip = useTip(tipLines(title, shortcut))
+  return (
+    <button
+      type="button"
+      className={`rt-btn ${active ? 'on' : ''}`}
+      {...tip}
+      onMouseDown={(e) => {
+        e.preventDefault()
+        run()
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
 function Toolbar({ editor, compact }: { editor: Editor; compact: boolean }): React.JSX.Element {
   // Re-renders the buttons as the selection moves, so active marks light up.
   const state = useEditorState({
@@ -251,25 +287,16 @@ function Toolbar({ editor, compact }: { editor: Editor; compact: boolean }): Rea
     })
   })
 
-  // mousedown + preventDefault keeps the text selection while clicking.
+  // Each button hovers to its name AND its keyboard shortcut — the
+  // toolbar doubles as the legend, no help panel required.
   const btn = (
     label: string,
     title: string,
     run: () => void,
-    active = false
+    active = false,
+    shortcut?: string
   ): React.JSX.Element => (
-    <button
-      key={title}
-      type="button"
-      title={title}
-      className={`rt-btn ${active ? 'on' : ''}`}
-      onMouseDown={(e) => {
-        e.preventDefault()
-        run()
-      }}
-    >
-      {label}
-    </button>
+    <RtBtn key={title} label={label} title={title} shortcut={shortcut} run={run} active={active} />
   )
 
   const chain = (): ReturnType<Editor['chain']> => editor.chain().focus()
@@ -300,14 +327,14 @@ function Toolbar({ editor, compact }: { editor: Editor; compact: boolean }): Rea
   if (compact) {
     return (
       <div className="rich-toolbar">
-        {btn('B', 'Bold (⌘B)', () => chain().toggleBold().run(), state.bold)}
-        {btn('I', 'Italic (⌘I)', () => chain().toggleItalic().run(), state.italic)}
-        {btn('S̶', 'Strikethrough', () => chain().toggleStrike().run(), state.strike)}
+        {btn('B', 'Bold', () => chain().toggleBold().run(), state.bold, '⌘B')}
+        {btn('I', 'Italic', () => chain().toggleItalic().run(), state.italic, '⌘I')}
+        {btn('S̶', 'Strikethrough', () => chain().toggleStrike().run(), state.strike, '⌘⇧S')}
         <span className="rt-sep" />
-        {btn('•', 'Bullet list', () => chain().toggleBulletList().run(), state.bullet)}
-        {btn('1.', 'Numbered list', () => chain().toggleOrderedList().run(), state.ordered)}
-        {btn('☑', 'Checklist', () => chain().toggleTaskList().run(), state.task)}
-        {btn('❝', 'Quote', () => chain().toggleBlockquote().run(), state.quote)}
+        {btn('•', 'Bullet list', () => chain().toggleBulletList().run(), state.bullet, '⌘⇧8')}
+        {btn('1.', 'Numbered list', () => chain().toggleOrderedList().run(), state.ordered, '⌘⇧7')}
+        {btn('☑', 'Checklist', () => chain().toggleTaskList().run(), state.task, '⌘⇧9')}
+        {btn('❝', 'Quote', () => chain().toggleBlockquote().run(), state.quote, '⌘⇧B')}
         {imageControls}
         <span className="rt-hint">md shortcuts work: # ** - [ ] &gt;</span>
       </div>
@@ -316,20 +343,20 @@ function Toolbar({ editor, compact }: { editor: Editor; compact: boolean }): Rea
 
   return (
     <div className="rich-toolbar">
-      {btn('H1', 'Heading 1', () => chain().toggleHeading({ level: 1 }).run(), state.h1)}
-      {btn('H2', 'Heading 2', () => chain().toggleHeading({ level: 2 }).run(), state.h2)}
-      {btn('H3', 'Heading 3', () => chain().toggleHeading({ level: 3 }).run(), state.h3)}
+      {btn('H1', 'Heading 1', () => chain().toggleHeading({ level: 1 }).run(), state.h1, '⌘⌥1')}
+      {btn('H2', 'Heading 2', () => chain().toggleHeading({ level: 2 }).run(), state.h2, '⌘⌥2')}
+      {btn('H3', 'Heading 3', () => chain().toggleHeading({ level: 3 }).run(), state.h3, '⌘⌥3')}
       <span className="rt-sep" />
-      {btn('B', 'Bold (⌘B)', () => chain().toggleBold().run(), state.bold)}
-      {btn('I', 'Italic (⌘I)', () => chain().toggleItalic().run(), state.italic)}
-      {btn('U', 'Underline (⌘U)', () => chain().toggleUnderline().run(), state.underline)}
-      {btn('S̶', 'Strikethrough', () => chain().toggleStrike().run(), state.strike)}
+      {btn('B', 'Bold', () => chain().toggleBold().run(), state.bold, '⌘B')}
+      {btn('I', 'Italic', () => chain().toggleItalic().run(), state.italic, '⌘I')}
+      {btn('U', 'Underline', () => chain().toggleUnderline().run(), state.underline, '⌘U')}
+      {btn('S̶', 'Strikethrough', () => chain().toggleStrike().run(), state.strike, '⌘⇧S')}
       <span className="rt-sep" />
-      {btn('•', 'Bullet list', () => chain().toggleBulletList().run(), state.bullet)}
-      {btn('1.', 'Numbered list', () => chain().toggleOrderedList().run(), state.ordered)}
-      {btn('☑', 'Checklist', () => chain().toggleTaskList().run(), state.task)}
-      {btn('❝', 'Quote', () => chain().toggleBlockquote().run(), state.quote)}
-      {btn('</>', 'Code block', () => chain().toggleCodeBlock().run(), state.code)}
+      {btn('•', 'Bullet list', () => chain().toggleBulletList().run(), state.bullet, '⌘⇧8')}
+      {btn('1.', 'Numbered list', () => chain().toggleOrderedList().run(), state.ordered, '⌘⇧7')}
+      {btn('☑', 'Checklist', () => chain().toggleTaskList().run(), state.task, '⌘⇧9')}
+      {btn('❝', 'Quote', () => chain().toggleBlockquote().run(), state.quote, '⌘⇧B')}
+      {btn('</>', 'Code block', () => chain().toggleCodeBlock().run(), state.code, '⌘⌥C')}
       {imageControls}
       <span className="rt-sep" />
       {state.inTable ? (
@@ -363,8 +390,8 @@ function Toolbar({ editor, compact }: { editor: Editor; compact: boolean }): Rea
         ))}
       </select>
       <span style={{ marginLeft: 'auto' }} />
-      {btn('↩', 'Undo (⌘Z)', () => chain().undo().run())}
-      {btn('↪', 'Redo (⇧⌘Z)', () => chain().redo().run())}
+      {btn('↩', 'Undo', () => chain().undo().run(), false, '⌘Z')}
+      {btn('↪', 'Redo', () => chain().redo().run(), false, '⇧⌘Z')}
     </div>
   )
 }
