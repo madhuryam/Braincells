@@ -11,7 +11,18 @@ import { itemBodyHtml } from '../richtext'
  * unmount. Multiple surfaces may edit the same item; last save wins,
  * acceptable because two are rarely edited together.
  */
-export function ItemNotes({ item }: { item: Item }): React.JSX.Element {
+export function ItemNotes({
+  item,
+  variant = 'compact',
+  toolbar = false
+}: {
+  item: Item
+  /** Editor dress: 'compact' for notes inside cards (the default),
+   *  'full' where the notes are a real section (the task peek, which
+   *  mirrors a meeting's notes pane). */
+  variant?: 'full' | 'compact'
+  toolbar?: boolean
+}): React.JSX.Element {
   const { bump } = useData()
   const mutate = useMutate()
   const itemId = item.id
@@ -64,12 +75,12 @@ export function ItemNotes({ item }: { item: Item }): React.JSX.Element {
   }, [bodyHtml])
 
   return (
-    // Toolbar-less: markdown shortcuts (`# `, `**`, `- `) format as
-    // you type, and the placeholder replaces the old "no notes" dead-end.
+    // Markdown shortcuts (`# `, `**`, `- `) format as you type either
+    // way, and the placeholder replaces the old "no notes" dead-end.
     <RichEditor
       key={`${itemId}:${epoch}`}
-      variant="compact"
-      toolbar={false}
+      variant={variant}
+      toolbar={toolbar}
       initialHtml={bodyHtml}
       placeholder="Notes — type **bold**, # headings, - lists…"
       onChange={onBodyChange}

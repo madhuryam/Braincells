@@ -8,6 +8,7 @@ import { Card } from '../components/Card'
 import { ItemCard } from '../components/ItemCard'
 import { LinkChips } from '../components/LinkChips'
 import { extractLinksFromHtml } from '../links'
+import { NotesSection } from '../components/NotesSection'
 import { PrepPicker } from '../components/PrepPicker'
 import { ProjectPicker } from '../components/ProjectPicker'
 import { BackButton, CheckableInput, Checkbox, ProgressBar } from '../components/bits'
@@ -271,8 +272,7 @@ export function Meeting({ eventKey, title, date, embedded = false }: MeetingProp
           </div>
         </section>
 
-        <section className="meeting-notes">
-          <div className="section-label">Notes</div>
+        <NotesSection>
           {notesQuery !== undefined && (
             <RichEditor
               key={eventKey}
@@ -281,7 +281,7 @@ export function Meeting({ eventKey, title, date, embedded = false }: MeetingProp
               onChange={onNotesChange}
             />
           )}
-        </section>
+        </NotesSection>
       </div>
 
       {pickerOpen && <PrepPicker event={event} onClose={() => setPickerOpen(false)} />}

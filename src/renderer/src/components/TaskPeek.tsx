@@ -7,6 +7,7 @@ import { createSubtask, SubtaskTree } from './SubtaskTree'
 import { LinkChips } from './LinkChips'
 import { extractLinksFromHtml } from '../links'
 import { ItemNotes } from './ItemNotes'
+import { NotesSection } from './NotesSection'
 import { ampm, durationLabel } from '../format'
 
 const DURATIONS = [5, 10, 15, 30, 45, 60, 90, 120] // minutes
@@ -140,7 +141,7 @@ export function TaskPeek({
   }
 
   return (
-    <div className="stack">
+    <div className="stack task-peek">
       <div className="row">
         <Checkbox checked={done} onToggle={() => patch({ status: done ? 'active' : 'done' })} />
         <input
@@ -273,7 +274,11 @@ export function TaskPeek({
         onSave={(next) => patch({ links: next })}
       />
 
-      <ItemNotes item={item} />
+      {/* The same Notes section a meeting's panel shows — shared
+          chrome, and the editor owns the rest of the panel's height. */}
+      <NotesSection fill>
+        <ItemNotes item={item} variant="full" toolbar />
+      </NotesSection>
     </div>
   )
 }

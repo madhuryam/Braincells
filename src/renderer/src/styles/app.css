@@ -2018,6 +2018,49 @@ kbd.key {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* Task peek: the notes section is the panel's last block and owns the
+   rest of the height — clicking anywhere below the text drops the
+   caret in, and long notes grow the panel's scroll instead of being
+   clipped to a card-sized strip. The flex chain threads through
+   EditorContent's anonymous wrapper (the .peek-canvas trick). */
+.detail-panel .task-peek {
+  min-height: 100%;
+}
+
+/* Only the notes may absorb the column's spare height. Everything
+   else keeps its natural size — .check-input carries flex:1 for row
+   layouts, and as a direct child of this stretched column it would
+   balloon the "Add a subtask" box to fill the gap. */
+.detail-panel .task-peek>* {
+  flex-grow: 0;
+}
+
+.detail-panel .task-peek>.notes-fill {
+  flex-grow: 1;
+}
+
+.notes-fill {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.notes-fill .rich-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.notes-fill .rich-editor>div:not(.rich-toolbar) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.notes-fill .ProseMirror {
+  flex: 1;
+}
+
 .rich-editor .ProseMirror>*+* {
   margin-top: 0.5em;
 }
