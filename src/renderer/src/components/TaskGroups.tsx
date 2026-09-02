@@ -27,12 +27,13 @@ interface TaskGroupsProps {
 }
 
 /**
- * A day's task list, broken into one block per project (sidebar order,
- * 'No project' last). Each block is itself a drop target: dragging a
- * card from 'No project' (or anywhere else) onto a project's block
- * files it into that project on this same day. The surrounding section
- * names the day and the block names the project, so cards hide both
- * pills. If nothing has a project, the list renders flat.
+ * A day's task list, broken into one block per project ('No project'
+ * first, then sidebar order). Each block is itself a drop target:
+ * dragging a card from 'No project' (or anywhere else) onto a
+ * project's block files it into that project on this same day. The
+ * surrounding section names the day and the block names the project,
+ * so cards hide both pills. If nothing has a project, the list
+ * renders flat.
  */
 export function TaskGroups({
   items,
@@ -132,13 +133,14 @@ export function TaskGroups({
   }
 
   const groups: Array<{ key: string; project: Project | null; items: Item[] }> = []
+  // No project, or the project was archived: one LEADING block — the
+  // still-unfiled work reads first, before the neatly filed projects.
+  const unassigned = ordered.filter((i) => !projects.some((p) => p.id === i.projectId))
+  if (unassigned.length > 0) groups.push({ key: 'none', project: null, items: unassigned })
   for (const p of projects) {
     const inProject = ordered.filter((i) => i.projectId === p.id)
     if (inProject.length > 0) groups.push({ key: p.id, project: p, items: inProject })
   }
-  // No project, or the project was archived: one trailing block.
-  const unassigned = ordered.filter((i) => !projects.some((p) => p.id === i.projectId))
-  if (unassigned.length > 0) groups.push({ key: 'none', project: null, items: unassigned })
 
   const showHeaders = groups.some((g) => g.project !== null)
 
