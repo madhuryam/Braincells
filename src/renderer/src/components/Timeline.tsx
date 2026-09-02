@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { useDroppable } from '@dnd-kit/core'
-import type { CalendarEvent, Item, LocalEvent } from '@shared/types'
+import type { CalendarEvent, LocalEvent } from '@shared/types'
 import { hhmm, todayYmd } from '@shared/dates'
 import { useData, useLiveQuery, useMutate } from '../state/data'
 import { useNav } from '../state/nav'
@@ -93,6 +93,20 @@ export function Timeline({
   // two are indistinguishable on the schedule.
   const plainLocals = locals.filter((l) => !l.itemId)
   const linkedLocals = locals.filter((l) => l.itemId)
+  // Tasks behind linked blocks that AREN'T in this day's own blocks —
+  // on a past day, a carried-over task's leftover block points at an
+  // item that now lives on today, so `blocks` alone can't dress it
+  // (done ✓, missed, project color) or feed its context menu.
+  const strayIds = linkedLocals
+    .map((l) => l.itemId!)
+    .filter((id) => !blocks.some((b) => b.id === id))
+  const strayKey = strayIds.join(',')
+  const strayItems =
+    useLiveQuery(async () => {
+      const items = await Promise.all(strayIds.map((id) => window.api.getItem(id)))
+      return new Map(items.filter((i) => i !== null).map((i) => [i!.id, i!]))
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [strayKey]) ?? new Map()
   const eventKeys = events.map((e) => e.eventKey).join(',')
   const prep = useLiveQuery(() => window.api.prepProgress(events.map((e) => e.eventKey)), [eventKeys]) ?? []
   const { projects } = useData()
@@ -571,7 +585,7 @@ export function Timeline({
                 block above: click peeks the task, drag moves, the
                 bottom edge resizes (this block only, never the task). */}
             {linkedLocals.map((l) => {
-              const item = blocks.find((b) => b.id === l.itemId)
+              const item = blocks.find((b) => b.id === l.itemId) ?? strayItems.get(l.itemId!)
               const td = taskDrag?.id === l.id ? taskDrag : null
               const start = td ? td.start : toMin(l.startTime)
               const end = td ? td.end : Math.max(toMin(l.endTime), toMin(l.startTime) + SLOT_MIN)
@@ -643,19 +657,16 @@ export function Timeline({
         </div>
       </div>
 
-      {taskMenu &&
-        (() => {
-          const t = blocks.find((b) => b.id === taskMenu.id)
-          return t ? (
-            <TaskBlockMenu
-              task={t}
-              localEventId={taskMenu.localEventId ?? null}
-              x={taskMenu.x}
-              y={taskMenu.y}
-              onClose={() => setTaskMenu(null)}
-            />
-          ) : null
-        })()}
+      {taskMenu && (
+        <TaskBlockMenu
+          taskId={taskMenu.id}
+          date={date}
+          localEventId={taskMenu.localEventId ?? null}
+          x={taskMenu.x}
+          y={taskMenu.y}
+          onClose={() => setTaskMenu(null)}
+        />
+      )}
     </div>
   )
 }
@@ -665,24 +676,51 @@ export function Timeline({
  * (the task itself stays on its list), or delete it outright — two-step
  * like the card menu's 🗑, with the same undo toast. On a task's EXTRA
  * block (localEventId set), "off calendar" removes just that block.
+ *
+ * Loads the task by id (not from the day's blocks): on a past day the
+ * clicked block may be a carried-over task's leftover local event, and
+ * that task lives on today's list now — checking it off from here
+ * records the completion on the day being viewed, same as a list card.
  */
 function TaskBlockMenu({
-  task,
+  taskId,
+  date,
   localEventId = null,
   x,
   y,
   onClose
 }: {
-  task: Item
+  taskId: string
+  /** The day whose timeline the menu opened on — done on a past day
+   *  backdates the completion to that day. */
+  date: string
   /** Set when the menu opened on a linked local block, not the task's own. */
   localEventId?: string | null
   x: number
   y: number
   onClose: () => void
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const mutate = useMutate()
   const { pushUndo } = useUndo()
   const [dropArmed, setDropArmed] = useState(false)
+  const task = useLiveQuery(() => window.api.getItem(taskId), [taskId])
+  // Picking a project swaps the chips for that project's sections, so
+  // filing goes all the way into a subsection without leaving the
+  // menu. Tracked locally (not off the task) so the swap is instant
+  // and never reads a half-landed save.
+  const [pickedProjectId, setPickedProjectId] = useState<string | null>(null)
+  const pickingSections = pickedProjectId !== null
+  const sections = useLiveQuery(
+    () => (pickedProjectId ? window.api.listSections(pickedProjectId) : Promise.resolve(null)),
+    [pickedProjectId]
+  )
+  // A project with no sections has nothing left to ask — the pick
+  // already saved, so the menu's work is done.
+  useEffect(() => {
+    if (pickingSections && sections && sections.filter((s) => s.status === 'active').length === 0)
+      onClose()
+  }, [pickingSections, sections, onClose])
+  if (!task) return null
   const done = task.status === 'done'
 
   return (
@@ -694,7 +732,16 @@ function TaskBlockMenu({
         onClick={() => {
           onClose()
           const prev = task.status
-          void mutate(() => window.api.updateItem(task.id, { status: done ? 'active' : 'done' }))
+          // Checking off from a past day's timeline records the
+          // completion on THAT day — logging what already happened,
+          // not doing it now (the list cards' backdating rule).
+          const backdate = !done && date < todayYmd()
+          void mutate(() =>
+            window.api.updateItem(task.id, {
+              status: done ? 'active' : 'done',
+              ...(backdate ? { completedAt: date } : {})
+            })
+          )
           if (!done) {
             pushUndo(`Completed “${shortTitle(task.title)}”`, async () => {
               await window.api.updateItem(task.id, { status: prev })
@@ -723,6 +770,41 @@ function TaskBlockMenu({
       >
         ✕ Off calendar
       </button>
+      {/* File the block's task into a project without leaving the
+          timeline — then straight into one of that project's sections
+          (the chips swap once a project is picked). */}
+      <div
+        style={{
+          borderTop: '1px solid var(--border)',
+          margin: '4px 4px 2px',
+          padding: '6px 2px 2px',
+          maxWidth: 280
+        }}
+      >
+        {!pickingSections ? (
+          <ProjectPicker
+            expanded
+            value={task.projectId}
+            onChange={(projectId) => {
+              // Re-picking the current project just opens its sections
+              // — the task's existing section must survive that.
+              if (projectId !== task.projectId)
+                void mutate(() => window.api.updateItem(task.id, { projectId, sectionId: null }))
+              if (projectId === null) onClose()
+              else setPickedProjectId(projectId)
+            }}
+          />
+        ) : (
+          <SectionPicker
+            projectId={pickedProjectId}
+            value={task.projectId === pickedProjectId ? task.sectionId : null}
+            onChange={(sectionId) => {
+              void mutate(() => window.api.updateItem(task.id, { sectionId }))
+              onClose()
+            }}
+          />
+        )}
+      </div>
       <button
         className="btn ghost small"
         style={{
