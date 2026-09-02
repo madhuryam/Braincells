@@ -2065,6 +2065,65 @@ kbd.key {
   margin-top: 0.5em;
 }
 
+/* ── Fold a section by its heading ──────────────────────────────────
+   The toggle hangs in the heading's left margin, whispered until the
+   heading is hovered; a folded heading keeps it visible and trails an
+   ellipsis so the tucked-away content isn't a secret. Hidden blocks
+   are decorations (display:none) — the text never leaves the doc. */
+.rich-editor .ProseMirror .hf-hidden {
+  display: none;
+}
+
+/* The chevrons need somewhere to live: the full editor reserves a
+   slim gutter INSIDE its own box. Hung outside it, the canvas's
+   overflow clipped them off the left edge of the page. (Compact
+   editors don't fold, so they keep their flush edge.) */
+.rich-editor.full .ProseMirror {
+  padding-left: 22px;
+}
+
+.rich-editor .ProseMirror :is(h1, h2, h3, h4, h5, h6) {
+  position: relative;
+}
+
+.heading-fold {
+  position: absolute;
+  left: -21px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.heading-fold:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.rich-editor .ProseMirror :is(h1, h2, h3, h4, h5, h6):hover .heading-fold {
+  opacity: 1;
+}
+
+.rich-editor .ProseMirror [data-collapsed='true'] .heading-fold {
+  opacity: 1;
+}
+
+.rich-editor .ProseMirror [data-collapsed='true']::after {
+  content: ' …';
+  color: var(--text-faint);
+}
+
 .rich-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;

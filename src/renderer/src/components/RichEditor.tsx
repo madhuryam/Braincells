@@ -3,13 +3,17 @@ import { Extension } from '@tiptap/core'
 import { EditorContent, useEditor, useEditorState, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletList } from '@tiptap/extension-bullet-list'
+import { Heading } from '@tiptap/extension-heading'
 import { Image as ImageExtension } from '@tiptap/extension-image'
 import { TableKit } from '@tiptap/extension-table'
 import { TextStyleKit } from '@tiptap/extension-text-style'
 import { Placeholder } from '@tiptap/extensions'
 import { TaskItem } from '@tiptap/extension-task-item'
 import { TaskList } from '@tiptap/extension-task-list'
-import type { EditorView } from '@tiptap/pm/view'
+import type { Node as PMNode } from '@tiptap/pm/model'
+import { Plugin, PluginKey, TextSelection, type Transaction } from '@tiptap/pm/state'
+import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
+import { foldState } from '../headingFold'
 import { tipLines, useTip } from './Tooltip'
 
 /**
@@ -161,6 +165,143 @@ const TabIndent = Extension.create({
   }
 })
 
+/**
+ * Headings carry a persistent `collapsed` flag (data-collapsed in the
+ * stored HTML), so a section folded on a canvas is still folded the
+ * next time the document opens. The flag alone changes nothing —
+ * HeadingFold below is what actually tucks the section away.
+ */
+const CollapsibleHeading = Heading.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      collapsed: {
+        default: false,
+        keepOnSplit: false,
+        parseHTML: (el: HTMLElement) => el.getAttribute('data-collapsed') === 'true',
+        renderHTML: (attrs: Record<string, unknown>) =>
+          attrs.collapsed ? { 'data-collapsed': 'true' } : {}
+      }
+    }
+  }
+})
+
+/** The document's top-level blocks plus which of them are folded away. */
+function docFoldState(doc: PMNode): {
+  blocks: Array<{ node: PMNode; pos: number }>
+  hidden: Set<number>
+  controller: Map<number, number>
+} {
+  const blocks: Array<{ node: PMNode; pos: number }> = []
+  doc.forEach((node, offset) => blocks.push({ node, pos: offset }))
+  return {
+    blocks,
+    ...foldState(
+      blocks.map(({ node }) => ({
+        level: node.type.name === 'heading' ? (node.attrs.level as number) : null,
+        collapsed: Boolean(node.attrs.collapsed)
+      }))
+    )
+  }
+}
+
+// The same wide open chevron the rest of the app draws (Today's
+// Chevron component) — the ▾/▸ glyphs render comically small next to
+// a heading's type.
+const CHEVRON_OPEN =
+  '<svg width="13" height="8" viewBox="0 0 16 9" aria-hidden="true"><path d="M1.5 1.5 L8 7.5 L14.5 1.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+const CHEVRON_CLOSED =
+  '<svg width="8" height="13" viewBox="0 0 9 16" aria-hidden="true"><path d="M1.5 1.5 L7.5 8 L1.5 14.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+/** The chevron that hangs in a heading's left margin (hover to see it). */
+function makeFoldToggle(view: EditorView, getPos: () => number | undefined, collapsed: boolean): HTMLElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'heading-fold'
+  btn.contentEditable = 'false'
+  btn.innerHTML = collapsed ? CHEVRON_CLOSED : CHEVRON_OPEN
+  btn.title = collapsed ? 'Expand this section' : 'Collapse this section (until the next heading of this size)'
+  btn.addEventListener('mousedown', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const at = (getPos() ?? 0) - 1 // the widget sits just inside the heading
+    const node = view.state.doc.nodeAt(at)
+    if (!node || node.type.name !== 'heading') return
+    const next = !node.attrs.collapsed
+    let tr = view.state.tr.setNodeMarkup(at, undefined, { ...node.attrs, collapsed: next })
+    // Folding must not strand the caret inside the section being
+    // hidden — park it at the end of the heading's own text.
+    if (next) tr = tr.setSelection(TextSelection.create(tr.doc, at + node.nodeSize - 1))
+    view.dispatch(tr)
+  })
+  return btn
+}
+
+/**
+ * Fold sections by their headings (SPEC-less nicety): each heading
+ * wears a toggle, and a collapsed one hides every block up to the next
+ * heading of the same or higher level. Decorations only — the hidden
+ * text never leaves the document (or the stored HTML, or search).
+ *
+ * Only the FULL variant mounts this: compact surfaces (card notes)
+ * clip the margin toggle, and a fold nobody can reach would trap
+ * content — there, everything simply shows expanded.
+ */
+const HeadingFold = Extension.create({
+  name: 'headingFold',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('headingFold'),
+        props: {
+          decorations(state) {
+            const { blocks, hidden } = docFoldState(state.doc)
+            const decos: Decoration[] = []
+            blocks.forEach(({ node, pos }, i) => {
+              if (node.type.name === 'heading' && node.content.size > 0) {
+                const collapsed = Boolean(node.attrs.collapsed)
+                decos.push(
+                  Decoration.widget(
+                    pos + 1,
+                    (view, getPos) => makeFoldToggle(view, getPos, collapsed),
+                    { side: -1, ignoreSelection: true }
+                  )
+                )
+              }
+              if (hidden.has(i)) {
+                decos.push(Decoration.node(pos, pos + node.nodeSize, { class: 'hf-hidden' }))
+              }
+            })
+            return DecorationSet.create(state.doc, decos)
+          }
+        },
+        // The caret must never sit in a hidden block (arrow keys, ⌘End,
+        // an Enter right after a folded heading) — auto-expand whatever
+        // hides it, unwrapping nested folds one controller at a time.
+        appendTransaction(trs, _old, state) {
+          if (!trs.some((tr) => tr.docChanged || tr.selectionSet)) return null
+          let tr: Transaction | null = null
+          for (let guard = 0; guard < 8; guard++) {
+            const doc = tr ? tr.doc : state.doc
+            const sel = tr ? tr.selection : state.selection
+            const { blocks, hidden, controller } = docFoldState(doc)
+            const idx = blocks.findIndex(
+              ({ node, pos }) => sel.from >= pos && sel.from < pos + node.nodeSize
+            )
+            if (idx === -1 || !hidden.has(idx)) break
+            const ctl = blocks[controller.get(idx)!]
+            tr = (tr ?? state.tr).setNodeMarkup(ctl.pos, undefined, {
+              ...ctl.node.attrs,
+              collapsed: false
+            })
+          }
+          return tr
+        }
+      })
+    ]
+  }
+})
+
 const FONTS: Array<[label: string, css: string]> = [
   ['Default', ''],
   ['Serif', 'Georgia, serif'],
@@ -178,8 +319,12 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
   onExitRef.current = onExit
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ bulletList: false }),
+      StarterKit.configure({ bulletList: false, heading: false }),
       BulletListNoAutoformat,
+      CollapsibleHeading,
+      // Folding only where the toggle is reachable; elsewhere the
+      // collapsed flag is inert and everything renders expanded.
+      ...(variant === 'full' ? [HeadingFold] : []),
       TableKit.configure({ table: { resizable: false } }),
       TextStyleKit,
       TaskList,
