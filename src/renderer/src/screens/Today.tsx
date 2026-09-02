@@ -54,10 +54,11 @@ export function Today(): React.JSX.Element {
   const doneToday = useLiveQuery(() => window.api.completedOn(date), [date]) ?? []
   // Folded until asked for — done work is a record, not the day's focus.
   const [showDone, setShowDone] = useState(false)
-  // "Coming up" starts open on the real today and folded when paging
-  // other days — there it's context, not the page's subject.
-  const [showComingUp, setShowComingUp] = useState(date === today)
-  useEffect(() => setShowComingUp(date === today), [date, today])
+  // "Coming up" starts folded everywhere — it's context, not the
+  // page's subject — and folds again whenever the view lands on a
+  // fresh day (open, reload, paging). Expanding it is a per-visit ask.
+  const [showComingUp, setShowComingUp] = useState(false)
+  useEffect(() => setShowComingUp(false), [date, today])
   // 📥 Intake: unfiled captures (⌥Space dumps, meeting follow-ups) to
   // categorize from right here — the Inbox tab is gone.
   const intake = useLiveQuery(() => window.api.inboxItems(), []) ?? []
@@ -396,7 +397,9 @@ export function Today(): React.JSX.Element {
 /** One upcoming day: a collapsible header, a drop target, its tasks. */
 function DaySection({ day }: { day: RollingDay }): React.JSX.Element {
   const tasks = useLiveQuery(() => window.api.tasksFor(day.date), [day.date]) ?? []
-  const [open, setOpen] = useState(true)
+  // Folded until asked for — the count pill on the header says what's
+  // there without unpacking every day of the week.
+  const [open, setOpen] = useState(false)
   // The quick-add shares the app-wide editing slot, so at most one
   // editor OR creator is ever open in the view — opening this collapses
   // any expanded card (and any other day's creator), and vice versa.
@@ -418,6 +421,7 @@ function DaySection({ day }: { day: RollingDay }): React.JSX.Element {
       <div className="day-header">
         <button className="section-label day-toggle" onClick={() => setOpen(!open)}>
           {open ? '▾' : '▸'} {day.label}
+          {!open && tasks.length > 0 && <span className="pill">{tasks.length}</span>}
         </button>
         <button className="day-add-btn" title={`Add a task on ${day.label}`} onClick={startAdd}>
           +
