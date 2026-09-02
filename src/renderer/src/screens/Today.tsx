@@ -17,7 +17,7 @@ import { ProjectPicker } from '../components/ProjectPicker'
 import { DraggableCard, DropZone } from '../components/dnd'
 import { Timeline } from '../components/Timeline'
 import { BackButton, CheckableInput, EmptyState } from '../components/bits'
-import { longDate, rollingDays, type RollingDay } from '../format'
+import { longDate, rollingDays, upcomingWeeks, type RollingDay, type UpcomingWeek } from '../format'
 
 /** 'August 5' — the weekday already leads the header, so no repeat. */
 function monthDay(date: string): string {
@@ -291,17 +291,26 @@ export function Today(): React.JSX.Element {
               </>
             )}
 
-            {/* The rest of the 5-day window, one collapsible group per day. */}
+            {/* The rest of the 5-day window, one collapsible group per
+            day — then the horizon coarsens to whole weeks. */}
             <button
               className="section-label day-toggle coming-up"
               onClick={() => setShowComingUp(!showComingUp)}
             >
               {showComingUp ? '▾' : '▸'} Coming up
             </button>
-            {showComingUp &&
-              rollingDays()
-                .slice(1)
-                .map((day) => <DaySection key={day.date} day={day} />)}
+            {showComingUp && (
+              <>
+                {rollingDays()
+                  .slice(1)
+                  .map((day) => (
+                    <DaySection key={day.date} day={day} />
+                  ))}
+                {upcomingWeeks().map((week) => (
+                  <WeekSection key={week.start} week={week} />
+                ))}
+              </>
+            )}
 
             {/* Undated tasks sink to the very bottom, folded — around,
             not in the way, until one gets dragged onto a day. */}
@@ -432,6 +441,59 @@ function DaySection({ day }: { day: RollingDay }): React.JSX.Element {
           <DueStrip date={day.date} />
           {adding && <DayQuickAdd date={day.date} onClose={closeAdd} />}
           <TaskGroups items={tasks} date={day.date} />
+          {tasks.length === 0 && !adding && (
+            <span style={{ color: 'var(--text-faint)', fontSize: 14, padding: '2px 0 8px', display: 'block' }}>
+              Nothing yet — drop a card here.
+            </span>
+          )}
+        </div>
+      )}
+    </DropZone>
+  )
+}
+
+/**
+ * One upcoming week: the same collapsible group a day gets, but a
+ * Monday–Sunday slice. Days the rolling window already shows keep
+ * their own sections — this group picks up where the horizon ends —
+ * while drops and quick-adds land on the week's Monday, the same date
+ * the 'next wk' / 'wk after' scheduling buttons assign.
+ */
+function WeekSection({ week }: { week: UpcomingWeek }): React.JSX.Element {
+  // The slice this group actually lists: everything in the week that
+  // isn't already a DaySection above (late in a week, the 5-day window
+  // reaches into next week).
+  const lastRolling = rollingDays().at(-1)!.date
+  const from = week.start > lastRolling ? week.start : ymdAddDays(lastRolling, 1)
+  const tasks = useLiveQuery(() => window.api.tasksBetween(from, week.end), [from, week.end]) ?? []
+  const [open, setOpen] = useState(false)
+  const editing = useEditing()
+  const addKey = `quickadd:${week.start}`
+  const adding = editing.openId === addKey
+
+  const startAdd = (): void => {
+    setOpen(true)
+    editing.setOpenId(addKey)
+  }
+  const closeAdd = (): void => {
+    if (editing.openId === addKey) editing.setOpenId(null)
+  }
+
+  return (
+    <DropZone id={`week-${week.start}`} data={{ type: 'schedule', date: week.start }}>
+      <div className="day-header">
+        <button className="section-label day-toggle" onClick={() => setOpen(!open)}>
+          {open ? '▾' : '▸'} {week.label}
+          {!open && tasks.length > 0 && <span className="pill">{tasks.length}</span>}
+        </button>
+        <button className="day-add-btn" title={`Add a task in ${week.label}`} onClick={startAdd}>
+          +
+        </button>
+      </div>
+      {open && (
+        <div>
+          {adding && <DayQuickAdd date={week.start} onClose={closeAdd} />}
+          <TaskGroups items={tasks} date={week.start} showItemDates />
           {tasks.length === 0 && !adding && (
             <span style={{ color: 'var(--text-faint)', fontSize: 14, padding: '2px 0 8px', display: 'block' }}>
               Nothing yet — drop a card here.

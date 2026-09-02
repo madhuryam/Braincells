@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useMutate } from '../state/data'
 import { useSelection } from '../state/selection'
-import { rollingDays } from '../format'
+import { rollingDays, upcomingWeeks } from '../format'
 import { ProjectPicker } from './ProjectPicker'
 import { isTyping } from './HotkeysHelp'
 
@@ -63,13 +63,16 @@ export function SelectionBar(): React.JSX.Element | null {
           {d.chip}
         </button>
       ))}
-      <button
-        className="btn small"
-        title="No date — they live in the backlog until you pick a day"
-        onClick={() => applyAll({ scheduledDate: null, status: 'active' })}
-      >
-        someday
-      </button>
+      {upcomingWeeks().map((w) => (
+        <button
+          key={w.start}
+          className="btn small"
+          title={`${w.label} — they land on that Monday`}
+          onClick={() => applyAll({ scheduledDate: w.start, status: 'active' })}
+        >
+          {w.chip}
+        </button>
+      ))}
       <ProjectPicker value={null} onChange={(projectId) => applyAll({ projectId })} />
       <button className="btn ghost small" title="Clear selection (Esc)" onClick={clear}>
         ✕

@@ -28,6 +28,19 @@ export function ymdAddDays(date: string, days: number): string {
   return ymd(dt)
 }
 
+/**
+ * The Monday of `date`'s week (weeks run Monday–Sunday), shifted by
+ * whole weeks: 0 = this week's Monday, 1 = next week's, 2 = the week
+ * after's. "Move it to next week" means THAT Monday — the scheduling
+ * shorthand never needs a day-level pick beyond the rolling window.
+ */
+export function mondayOfWeek(date: string, weeksAhead = 0): string {
+  const [y, m, d] = date.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  const sinceMonday = (dt.getDay() + 6) % 7 // Mon=0 … Sun=6
+  return ymd(new Date(y, m - 1, d - sinceMonday + weeksAhead * 7))
+}
+
 /** 'HH:MM' for a Date, in local time. */
 export function hhmm(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`

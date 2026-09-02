@@ -55,7 +55,9 @@ export function registerStoreIpc(store: Store): void {
   ipcMain.handle('inbox:recentCompleted', (_e, limit?: number) => store.recentCompleted(limit))
   ipcMain.handle('today:tasks', (_e, date: string) => store.tasksFor(date))
   ipcMain.handle('today:blocks', (_e, date: string) => store.scheduledBlocks(date))
-  ipcMain.handle('today:week', (_e, date: string) => store.tasksThisWeek(date))
+  ipcMain.handle('today:between', (_e, start: string, end: string) =>
+    store.tasksBetween(start, end)
+  )
   ipcMain.handle('today:dueOn', (_e, date: string) => store.tasksDueOn(date))
   ipcMain.handle('today:overdue', (_e, date: string) => store.tasksOverdue(date))
   ipcMain.handle('project:items', (_e, projectId: string) => store.projectItems(projectId))

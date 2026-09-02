@@ -24,6 +24,12 @@ interface TaskGroupsProps {
    * freely afterwards — this is a broadcast, not a lock.
    */
   fold?: { seq: number; collapsed: boolean }
+  /**
+   * Keep each card's scheduled-date pill. Day lists hide it (the
+   * section header names the day); a week group spans several days,
+   * so the pill is the only thing saying which one.
+   */
+  showItemDates?: boolean
 }
 
 /**
@@ -40,7 +46,8 @@ export function TaskGroups({
   date,
   sortable = false,
   footer,
-  fold
+  fold,
+  showItemDates = false
 }: TaskGroupsProps): React.JSX.Element {
   const { projects } = useData()
   // Sections for every project, so each block can separate its tasks
@@ -229,11 +236,11 @@ export function TaskGroups({
               {list.map((item) =>
                 sortable ? (
                   <SortableCard key={item.id} item={item} sortableIds={ids}>
-                    <ItemCard item={item} showProject={false} showDate={false} contextDate={date} />
+                    <ItemCard item={item} showProject={false} showDate={showItemDates} contextDate={date} />
                   </SortableCard>
                 ) : (
                   <DraggableCard key={item.id} item={item}>
-                    <ItemCard item={item} showProject={false} showDate={false} contextDate={date} />
+                    <ItemCard item={item} showProject={false} showDate={showItemDates} contextDate={date} />
                   </DraggableCard>
                 )
               )}

@@ -17,7 +17,15 @@ import { extractLinksFromHtml } from '../links'
 import { ProjectPicker } from './ProjectPicker'
 import { RichEditor, type RichEditorHandle } from './RichEditor'
 import { itemBodyHtml } from '../richtext'
-import { durationLabel, KIND_ICON, mmdd, prettyDate, projectLabel, rollingDays } from './../format'
+import {
+  durationLabel,
+  KIND_ICON,
+  mmdd,
+  prettyDate,
+  projectLabel,
+  rollingDays,
+  upcomingWeeks
+} from './../format'
 
 interface ItemCardProps {
   item: Item
@@ -610,10 +618,10 @@ export function ItemCard({
               onChange={onBodyChange}
               onExit={closeCard}
             />
-            {/* One line: when to do it (the 5-day rolling window, or
-              someday) and which project. With many projects the picker
-              drops names to just the colored dots, and the whole tail
-              scrolls sideways rather than wrapping. */}
+            {/* One line: when to do it (the 5-day rolling window, then
+              whole weeks) and which project. With many projects the
+              picker drops names to just the colored dots, and the whole
+              tail scrolls sideways rather than wrapping. */}
             <div className="row" style={{ gap: 6 }}>
               {(item.kind === 'task' || item.kind === 'prep') && (
                 <>
@@ -634,24 +642,31 @@ export function ItemCard({
                       {d.chip}
                     </button>
                   ))}
-                  <button
-                    // Highlighted only once the item is really parked in the
-                    // backlog — an untriaged intake item (also dateless) must
-                    // not read as auto-assigned to someday.
-                    className={`btn small ${item.scheduledDate === null && item.status !== 'inbox' ? 'primary' : ''}`}
-                    style={{ flexShrink: 0 }}
-                    title="No date — lives in the backlog until you pick a day"
-                    onClick={() =>
-                      patch({
-                        scheduledDate: null,
-                        scheduledTime: null,
-                        timeEstimateMinutes: null,
-                        ...(item.status === 'inbox' ? { status: 'active' as ItemStatus } : {})
-                      })
-                    }
-                  >
-                    someday
-                  </button>
+                  {upcomingWeeks().map((w) => (
+                    <button
+                      key={w.start}
+                      // Lit whenever the task sits anywhere in that week —
+                      // unless a day button already claims the exact date.
+                      className={`btn small ${
+                        item.scheduledDate !== null &&
+                        item.scheduledDate >= w.start &&
+                        item.scheduledDate <= w.end &&
+                        !rollingDays().some((d) => d.date === item.scheduledDate)
+                          ? 'primary'
+                          : ''
+                      }`}
+                      style={{ flexShrink: 0 }}
+                      title={`${w.label} — lands on that Monday`}
+                      onClick={() =>
+                        patch({
+                          scheduledDate: w.start,
+                          ...(item.status === 'inbox' ? { status: 'active' as ItemStatus } : {})
+                        })
+                      }
+                    >
+                      {w.chip}
+                    </button>
+                  ))}
                   <span className="editor-divider" aria-hidden />
                 </>
               )}

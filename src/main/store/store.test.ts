@@ -263,7 +263,13 @@ describe('Today / This Week / carried over', () => {
     })
 
     expect(store.tasksFor(today).map((i) => i.id)).toEqual([todayTask.id])
-    expect(store.tasksThisWeek(today).map((i) => i.id)).toEqual([soon.id])
+    expect(
+      store.tasksBetween(ymdAddDays(today, 1), ymdAddDays(today, 7)).map((i) => i.id)
+    ).toEqual([soon.id])
+    // Inclusive on both ends — a task on the range's edge days counts.
+    expect(
+      store.tasksBetween(ymdAddDays(today, 3), ymdAddDays(today, 3)).map((i) => i.id)
+    ).toEqual([soon.id])
 
     // Auto carry-over rolls the unfinished past task onto today.
     expect(store.carryOver(today)).toBe(1)

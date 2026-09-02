@@ -495,20 +495,24 @@ export class Store {
       .map(rowToItem)
   }
 
-  /** Active tasks scheduled after `date`, within the next 7 days. */
-  tasksThisWeek(date: string): Item[] {
+  /**
+   * Active tasks scheduled anywhere in [start, end] (inclusive), in
+   * day order — the Coming up section's week groups. Subtasks are
+   * excluded, same as tasksFor.
+   */
+  tasksBetween(start: string, end: string): Item[] {
     return this.db
       .prepare(
         `SELECT ${ITEM_COLS} FROM items
          WHERE kind = 'task' AND status = 'active'
-           AND scheduled_date > ? AND scheduled_date <= ?
+           AND scheduled_date >= ? AND scheduled_date <= ?
            AND NOT EXISTS (
              SELECT 1 FROM links l
              WHERE l.from_item_id = items.id AND l.role = 'subtask-of'
            )
-         ORDER BY scheduled_date, sort_order`
+         ORDER BY scheduled_date, sort_order, created_at`
       )
-      .all(date, ymdAddDays(date, 7))
+      .all(start, end)
       .map(rowToItem)
   }
 
