@@ -18,6 +18,7 @@
     "test": "vitest run",
     "pretest": "npm rebuild better-sqlite3",
     "dist": "electron-vite build && electron-builder --mac",
+    "release": "bash scripts/release.sh",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
