@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { app, ipcMain } from 'electron'
 import type { ItemPatch, NewItem, Store } from './store'
 import type { CalendarEvent, LinkRole, AttachedLink, ProjectStatus } from '../shared/types'
 
@@ -138,4 +138,8 @@ export function registerStoreIpc(store: Store): void {
   // Settings
   ipcMain.handle('settings:get', (_e, key: string) => store.getSetting(key))
   ipcMain.handle('settings:set', (_e, key: string, value: unknown) => store.setSetting(key, value))
+
+  // The app's own version (package.json in dev, the bundle's in a
+  // packaged build) — shown at the bottom of Settings.
+  ipcMain.handle('app:version', () => app.getVersion())
 }

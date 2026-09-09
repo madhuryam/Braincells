@@ -33,6 +33,7 @@ type CalendarMode = 'demo' | 'google' | 'off'
 export function Settings(): React.JSX.Element {
   const { theme, setTheme, showDuePill, setShowDuePill } = useData()
   const mutate = useMutate()
+  const version = useLiveQuery(() => window.api.appVersion(), [])
   const mode = useLiveQuery(() => window.api.getSetting<CalendarMode>('calendarMode'), []) ?? 'demo'
   const google = useLiveQuery(() => window.api.googleStatus(), [])
   const hideWorkLocation =
@@ -440,6 +441,13 @@ export function Settings(): React.JSX.Element {
             </button>
           </div>
         </Card>
+
+        {/* A quiet footnote, not a card — which build is running. */}
+        {version && (
+          <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--text-faint)' }}>
+            braincells v{version}
+          </p>
+        )}
       </div>
     </div>
   )

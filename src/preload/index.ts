@@ -176,6 +176,7 @@ const api = {
   // Settings
   getSetting: <T,>(key: string): Promise<T | null> => invoke('settings:get', key),
   setSetting: (key: string, value: unknown): Promise<void> => invoke('settings:set', key, value),
+  appVersion: (): Promise<string> => invoke('app:version'),
 
   // Calendar (read live, never stored)
   calendarEvents: (startDate: string, endDate: string): Promise<CalendarEvent[]> =>
