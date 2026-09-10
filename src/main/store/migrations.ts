@@ -304,6 +304,23 @@ const MIGRATIONS: string[] = [
   // same JSON-on-the-row reasoning as migration 15.
   `
   ALTER TABLE items ADD COLUMN links TEXT NOT NULL DEFAULT '[]';
+  `,
+
+  // 17: signals — the ≤5 tasks that are "what happens next", each
+  // wearing a priority slot 1–5 (1 loudest). One task per slot;
+  // setSignal() enforces that, which is also what caps signals at
+  // five. NULL = not a signal.
+  `
+  ALTER TABLE items ADD COLUMN signal_priority INTEGER;
+  `,
+
+  // 18: canvases can archive — shelved in a collapsed list on their
+  // project page, read-only until unarchived, and out of the sidebar's
+  // right-click canvas list. A timestamp rather than a status value:
+  // the status CHECK stays untouched and the shelf can say when each
+  // canvas was put away.
+  `
+  ALTER TABLE items ADD COLUMN archived_at TEXT;
   `
 ]
 

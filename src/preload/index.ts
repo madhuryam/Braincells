@@ -94,6 +94,9 @@ const api = {
   openTaskTree: (): Promise<Array<{ depth: number; item: Item }>> => invoke('items:openTree'),
   unfiledNotes: (): Promise<Item[]> => invoke('inbox:unfiledNotes'),
   recentCompleted: (limit?: number): Promise<Item[]> => invoke('inbox:recentCompleted', limit),
+  setSignal: (itemId: string, priority: number | null): Promise<void> =>
+    invoke('items:setSignal', itemId, priority),
+  signalItems: (): Promise<Item[]> => invoke('items:signals'),
   tasksFor: (date: string): Promise<Item[]> => invoke('today:tasks', date),
   scheduledBlocks: (date: string): Promise<Item[]> => invoke('today:blocks', date),
   tasksBetween: (start: string, end: string): Promise<Item[]> => invoke('today:between', start, end),
@@ -169,6 +172,7 @@ const api = {
   calendarMinutes: (id: string): Promise<number> => invoke('items:calendarMinutes', id),
   removeFromCalendar: (id: string): Promise<void> => invoke('items:removeFromCalendar', id),
   localEventsFor: (date: string): Promise<LocalEvent[]> => invoke('localEvents:for', date),
+  localEventsOf: (itemId: string): Promise<LocalEvent[]> => invoke('localEvents:of', itemId),
 
   // Search
   search: (query: string): Promise<Item[]> => invoke('search:query', query),
@@ -187,6 +191,18 @@ const api = {
   googleDisconnect: (): Promise<void> => invoke('calendar:googleDisconnect'),
   /** Drop the fetch cache and refresh every window's calendar queries. */
   syncCalendarNow: (): Promise<void> => invoke('calendar:syncNow'),
+  listGoogleCalendars: (): Promise<
+    Array<{ id: string; summary: string; primary: boolean; accessRole: string }>
+  > => invoke('calendar:list'),
+  createCalendarEvent: (ev: {
+    title: string
+    date: string
+    startTime: string
+    endTime: string
+  }): Promise<{ ok: boolean; error?: string; event?: CalendarEvent }> =>
+    invoke('calendar:createEvent', ev),
+  deleteCalendarEvent: (eventKey: string): Promise<{ ok: boolean; error?: string }> =>
+    invoke('calendar:deleteEvent', eventKey),
 
   // Backup / export / restore (each opens a native dialog)
   createBackup: (): Promise<string | null> => invoke('backup:create'),

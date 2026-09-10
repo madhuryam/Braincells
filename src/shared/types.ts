@@ -45,6 +45,12 @@ export interface Item {
   sortOrder: number
   /** Quick-access favorites, surfaced in the sidebar. */
   starred: boolean
+  /** Signal slot 1–5 (1 loudest) when this is a "what happens next"
+   *  task; null otherwise. One item per slot, five slots app-wide. */
+  signalPriority: number | null
+  /** Pages only: when the canvas was archived (shelved read-only on
+   *  its project page); null = live. */
+  archivedAt: string | null
   createdAt: string
   /** Last edit (null only for rows migrated before this existed). */
   updatedAt: string | null
@@ -125,6 +131,10 @@ export interface CalendarEvent {
   /** The video-call URL: hangoutLink for plain Meet events, else the
    *  conferenceData video entry point (Zoom etc. via add-ons). */
   meetLink?: string | null
+  /** Set ONLY for events from the writable secondary calendar — the
+   *  marker that in-app deletion is allowed. Subscribed-calendar
+   *  events never carry it: they are read-only, always. */
+  calendarId?: string | null
 }
 
 /**

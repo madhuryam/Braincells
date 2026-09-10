@@ -78,6 +78,82 @@ describe('calendarMinutes', () => {
     expect(store.calendarMinutes(t.id)).toBe(0)
     expect(store.calendarInstanceCount(t.id)).toBe(0)
   })
+
+  it('localEventsOf snapshots a task’s blocks, enough to rebuild them (⌘Z)', () => {
+    const t = store.createItem({
+      kind: 'task', title: 'undoable', status: 'active',
+      scheduledDate: today, scheduledTime: '09:00', timeEstimateMinutes: 30
+    })
+    store.createLocalEvent({ title: 'undoable', date: today, startTime: '14:00', endTime: '14:30', itemId: t.id })
+    store.createLocalEvent({ title: 'undoable', date: today, startTime: '11:00', endTime: '11:15', itemId: t.id })
+    // Unrelated blocks stay out of the snapshot.
+    store.createLocalEvent({ title: 'someone else', date: today, startTime: '08:00', endTime: '08:30' })
+
+    const blocks = store.localEventsOf(t.id)
+    expect(blocks.map((b) => b.startTime)).toEqual(['11:00', '14:00']) // day order
+    expect(blocks.every((b) => b.itemId === t.id)).toBe(true)
+
+    // The undo path: remove from calendar, then rebuild from the snapshot.
+    store.removeFromCalendar(t.id)
+    expect(store.localEventsOf(t.id)).toEqual([])
+    for (const b of blocks) {
+      store.createLocalEvent({
+        title: b.title, date: b.date, startTime: b.startTime, endTime: b.endTime,
+        projectId: b.projectId, itemId: b.itemId
+      })
+    }
+    store.updateItem(t.id, { scheduledTime: '09:00', timeEstimateMinutes: 30 })
+    expect(store.calendarInstanceCount(t.id)).toBe(3)
+    expect(store.calendarMinutes(t.id)).toBe(75)
+  })
+})
+
+describe('canvas archive', () => {
+  it('archivedAt round-trips through updateItem and clears back to live', () => {
+    const page = store.createItem({ kind: 'page', title: 'notes', status: 'active' })
+    expect(page.archivedAt).toBeNull()
+    store.updateItem(page.id, { archivedAt: '2026-09-09 10:00:00' })
+    expect(store.getItem(page.id)?.archivedAt).toBe('2026-09-09 10:00:00')
+    store.updateItem(page.id, { archivedAt: null })
+    expect(store.getItem(page.id)?.archivedAt).toBeNull()
+  })
+})
+
+describe('signals (priority slots 1–5)', () => {
+  it('one item per slot: claiming a slot clears the previous holder', () => {
+    const a = store.createItem({ kind: 'task', title: 'a', status: 'active' })
+    const b = store.createItem({ kind: 'task', title: 'b', status: 'active' })
+    store.setSignal(a.id, 1)
+    store.setSignal(b.id, 1)
+    expect(store.getItem(a.id)?.signalPriority).toBeNull()
+    expect(store.getItem(b.id)?.signalPriority).toBe(1)
+    // Five slots means never more than five signals, whatever happens.
+    const extras = [2, 3, 4, 5].map((p) => {
+      const t = store.createItem({ kind: 'task', title: `p${p}`, status: 'active' })
+      store.setSignal(t.id, p)
+      return t
+    })
+    store.setSignal(a.id, 3) // steals slot 3
+    expect(store.signalItems()).toHaveLength(5)
+    expect(store.getItem(extras[1].id)?.signalPriority).toBeNull()
+    // Loudest first.
+    expect(store.signalItems()[0].signalPriority).toBe(1)
+  })
+
+  it('clears on null, and automatically when the task finishes or drops', () => {
+    const t = store.createItem({ kind: 'task', title: 't', status: 'active' })
+    store.setSignal(t.id, 2)
+    store.setSignal(t.id, null)
+    expect(store.getItem(t.id)?.signalPriority).toBeNull()
+
+    store.setSignal(t.id, 2)
+    store.updateItem(t.id, { status: 'done' })
+    expect(store.getItem(t.id)?.signalPriority).toBeNull() // slot freed
+    store.updateItem(t.id, { status: 'active' })
+    store.setSignal(t.id, 2)
+    store.updateItem(t.id, { status: 'dropped' })
+    expect(store.signalItems()).toHaveLength(0)
+  })
 })
 
 describe('item creation order', () => {

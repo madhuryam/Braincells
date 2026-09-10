@@ -51,7 +51,7 @@ export interface LinkedItem {
 // Column lists are written out once so every query returns identical shapes.
 const ITEM_COLS = `id, kind, title, content, rich_content, status, project_id, section_id,
   due_date, scheduled_date, scheduled_time, time_estimate_minutes, links, sort_order, starred,
-  created_at, updated_at, completed_at`
+  signal_priority, archived_at, created_at, updated_at, completed_at`
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function rowToItem(r: any): Item {
@@ -71,6 +71,8 @@ function rowToItem(r: any): Item {
     links: JSON.parse(r.links),
     sortOrder: r.sort_order,
     starred: !!r.starred,
+    signalPriority: r.signal_priority,
+    archivedAt: r.archived_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at
@@ -293,13 +295,15 @@ export class Store {
       links: [],
       sortOrder: n.atTop ? this.topSortOrder() : this.nextSortOrder(),
       starred: false,
+      signalPriority: null,
+      archivedAt: null,
       createdAt: nowStamp(),
       updatedAt: nowStamp(),
       completedAt: null
     }
     this.db
       .prepare(
-        `INSERT INTO items (${ITEM_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO items (${ITEM_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         item.id,
@@ -317,6 +321,8 @@ export class Store {
         JSON.stringify(item.links),
         item.sortOrder,
         item.starred ? 1 : 0,
+        item.signalPriority,
+        item.archivedAt,
         item.createdAt,
         item.updatedAt,
         item.completedAt
@@ -364,7 +370,8 @@ export class Store {
       timeEstimateMinutes: 'time_estimate_minutes',
       links: 'links',
       sortOrder: 'sort_order',
-      starred: 'starred'
+      starred: 'starred',
+      archivedAt: 'archived_at'
     }
     const sets: string[] = []
     const vals: unknown[] = []
@@ -389,6 +396,15 @@ export class Store {
       // Moving an existing completion to another day.
       sets.push('completed_at = ?')
       vals.push(explicitDone)
+    }
+    // A finished (or dropped) task is no longer "what happens next" —
+    // its signal clears with it, freeing the slot.
+    if (
+      (patch.status === 'done' || patch.status === 'dropped') &&
+      patch.status !== existing.status &&
+      existing.signalPriority !== null
+    ) {
+      sets.push('signal_priority = NULL')
     }
     // Intake triage: giving an inbox item a day or a project IS the
     // categorization — it graduates to active unless the patch says
@@ -1298,6 +1314,37 @@ export class Store {
     return (item?.timeEstimateMinutes ?? 0) + blocks
   }
 
+  /**
+   * Signals: mark a task (or subtask) as "what happens next", in one
+   * of five priority slots — 1 is the loudest. A slot holds ONE item:
+   * claiming it quietly clears the previous holder, which is also
+   * what caps signals at five. null clears the item's signal.
+   */
+  setSignal(itemId: string, priority: number | null): void {
+    this.db.transaction(() => {
+      if (priority !== null) {
+        this.db
+          .prepare('UPDATE items SET signal_priority = NULL WHERE signal_priority = ?')
+          .run(priority)
+      }
+      this.db
+        .prepare('UPDATE items SET signal_priority = ?, updated_at = ? WHERE id = ?')
+        .run(priority, nowStamp(), itemId)
+    })()
+  }
+
+  /** Every live signaled item, loudest slot first. */
+  signalItems(): Item[] {
+    return this.db
+      .prepare(
+        `SELECT ${ITEM_COLS} FROM items
+         WHERE signal_priority IS NOT NULL AND status IN ('active', 'inbox')
+         ORDER BY signal_priority`
+      )
+      .all()
+      .map(rowToItem)
+  }
+
   /** Take a task off the calendar entirely: slot and linked blocks. */
   removeFromCalendar(itemId: string): void {
     this.db.transaction(() => {
@@ -1320,6 +1367,18 @@ export class Store {
          FROM local_events WHERE date = ? ORDER BY start_time`
       )
       .all(date) as LocalEvent[]
+  }
+
+  /** Every block pointing at one task — captured before destructive
+   *  actions (off calendar) so ⌘Z can rebuild them exactly. */
+  localEventsOf(itemId: string): LocalEvent[] {
+    return this.db
+      .prepare(
+        `SELECT id, title, date, start_time AS startTime, end_time AS endTime,
+                project_id AS projectId, item_id AS itemId
+         FROM local_events WHERE item_id = ? ORDER BY date, start_time`
+      )
+      .all(itemId) as LocalEvent[]
   }
 
   // ── Danger zone ─────────────────────────────────────────────────────

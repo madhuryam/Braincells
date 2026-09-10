@@ -96,11 +96,12 @@ describe.runIf(existsSync(SNAPSHOT))('real-data backup → restore audit', () =>
     store.close()
 
     // The snapshot predates migrations 14 (sections.status), 15
-    // (meetings.links) and 16 (items.links). Opening it migrates
+    // (meetings.links), 16 (items.links), 17 (items.signal_priority) and 18 (items.archived_at).
+    // Opening it migrates
     // forward; the only permitted changes are those new defaulted
     // columns — every pre-existing value must survive.
     expect(versionBefore).toBe(13)
-    expect(versionAfter).toBe(16)
+    expect(versionAfter).toBe(18)
     const after = dumpAll(copy)
     for (const table of Object.keys(before)) {
       if (table === 'sections' || table === 'meetings' || table === 'items') continue
@@ -115,7 +116,7 @@ describe.runIf(existsSync(SNAPSHOT))('real-data backup → restore audit', () =>
       before.meetings.map((row) => ({ ...JSON.parse(row), links: '[]' }))
     )
     expect(after.items.map((row) => JSON.parse(row))).toEqual(
-      before.items.map((row) => ({ ...JSON.parse(row), links: '[]' }))
+      before.items.map((row) => ({ ...JSON.parse(row), links: '[]', signal_priority: null, archived_at: null }))
     )
   })
 

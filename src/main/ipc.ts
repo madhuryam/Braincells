@@ -53,6 +53,10 @@ export function registerStoreIpc(store: Store): void {
   ipcMain.handle('items:openTree', () => store.openTaskTree())
   ipcMain.handle('inbox:unfiledNotes', () => store.unfiledNotes())
   ipcMain.handle('inbox:recentCompleted', (_e, limit?: number) => store.recentCompleted(limit))
+  ipcMain.handle('items:setSignal', (_e, itemId: string, priority: number | null) =>
+    store.setSignal(itemId, priority)
+  )
+  ipcMain.handle('items:signals', () => store.signalItems())
   ipcMain.handle('today:tasks', (_e, date: string) => store.tasksFor(date))
   ipcMain.handle('today:blocks', (_e, date: string) => store.scheduledBlocks(date))
   ipcMain.handle('today:between', (_e, start: string, end: string) =>
@@ -131,6 +135,7 @@ export function registerStoreIpc(store: Store): void {
   ipcMain.handle('items:removeFromCalendar', (_e, id: string) => store.removeFromCalendar(id))
   ipcMain.handle('localEvents:for', (_e, date: string) => store.localEventsFor(date))
   ipcMain.handle('localEvents:get', (_e, id: string) => store.getLocalEvent(id))
+  ipcMain.handle('localEvents:of', (_e, itemId: string) => store.localEventsOf(itemId))
 
   // Search
   ipcMain.handle('search:query', (_e, query: string) => store.search(query))

@@ -124,6 +124,8 @@ describe('schema coverage census', () => {
       'due_date',
       'completed_at',
       'starred',
+      'signal_priority',
+      'archived_at',
       'sort_order',
       'links'
     ])

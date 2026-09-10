@@ -99,6 +99,8 @@ function itemMarkdown(
     ['due', item.dueDate],
     ['completed', item.completedAt],
     ['starred', item.starred ? 'true' : null],
+    ['signal', item.signalPriority != null ? String(item.signalPriority) : null],
+    ['archived', item.archivedAt ?? null],
     ['sortOrder', item.sortOrder != null ? String(item.sortOrder) : null],
     // Attached links, sparse like starred: one JSON line when present.
     ['links', item.links.length > 0 ? JSON.stringify(item.links) : null]

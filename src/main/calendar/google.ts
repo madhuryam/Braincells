@@ -36,8 +36,23 @@ interface GoogleClient {
 
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
-const EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
-const SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
+const API = 'https://www.googleapis.com/calendar/v3'
+// Reading stays effectively read-only in spirit: the app never writes
+// to the subscribed (primary) calendar. The events scope exists ONLY
+// so ad-hoc meetings can land on the separate writable calendar picked
+// in Settings. Connections made before this scope existed must be
+// disconnected and reconnected once to grant it.
+const SCOPE =
+  'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events'
+
+/** One row of the user's calendar list — enough to pick a writable one. */
+export interface GoogleCalendarInfo {
+  id: string
+  summary: string
+  primary: boolean
+  /** 'owner' | 'writer' | 'reader' | 'freeBusyReader' */
+  accessRole: string
+}
 
 export class GoogleCalendar {
   constructor(private store: Store) {}
@@ -88,7 +103,11 @@ export class GoogleCalendar {
     }
   }
 
-  async eventsBetween(startDate: string, endDate: string): Promise<CalendarEvent[]> {
+  async eventsBetween(
+    startDate: string,
+    endDate: string,
+    calendarId = 'primary'
+  ): Promise<CalendarEvent[]> {
     const accessToken = await this.freshAccessToken()
     const events: CalendarEvent[] = []
     // Wide ranges (the scrolling calendar asks for months at a time)
@@ -103,9 +122,10 @@ export class GoogleCalendar {
         maxResults: '250'
       })
       if (pageToken) params.set('pageToken', pageToken)
-      const res = await fetch(`${EVENTS_URL}?${params}`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      })
+      const res = await fetch(
+        `${API}/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      )
       if (!res.ok) throw new Error(`Google Calendar: ${res.status} ${await res.text()}`)
       const body = (await res.json()) as {
         nextPageToken?: string
@@ -115,11 +135,74 @@ export class GoogleCalendar {
       for (const e of body.items ?? []) {
         if (isDeclinedByMe(e.attendees)) continue
         const mapped = mapGoogleEvent(e)
-        if (mapped) events.push(mapped)
+        // Secondary-calendar events carry their source id — the marker
+        // that lets the UI offer in-app deletion (primary never gets it).
+        if (mapped) events.push(calendarId === 'primary' ? mapped : { ...mapped, calendarId })
       }
       pageToken = body.nextPageToken
     } while (pageToken)
     return events
+  }
+
+  /** The account's calendars — Settings offers the writable ones. */
+  async listCalendars(): Promise<GoogleCalendarInfo[]> {
+    const accessToken = await this.freshAccessToken()
+    const res = await fetch(`${API}/users/me/calendarList?maxResults=250`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    })
+    if (!res.ok) throw new Error(`Google Calendar: ${res.status} ${await res.text()}`)
+    const body = (await res.json()) as {
+      items?: Array<{ id: string; summary?: string; primary?: boolean; accessRole?: string }>
+    }
+    return (body.items ?? []).map((c) => ({
+      id: c.id,
+      summary: c.summary ?? c.id,
+      primary: Boolean(c.primary),
+      accessRole: c.accessRole ?? 'reader'
+    }))
+  }
+
+  /**
+   * Create an ad-hoc event (a huddle, a phone call) on ONE calendar —
+   * always the designated writable one, never primary (the caller
+   * enforces that; this method just writes where it's told). Returns
+   * the created event mapped like any fetched one, so prep/notes/
+   * follow-ups attach to it immediately.
+   */
+  async createEvent(
+    calendarId: string,
+    ev: { title: string; date: string; startTime: string; endTime: string }
+  ): Promise<CalendarEvent | null> {
+    const accessToken = await this.freshAccessToken()
+    const at = (time: string): string => localDateTime(ev.date, time).toISOString()
+    const res = await fetch(`${API}/calendars/${encodeURIComponent(calendarId)}/events`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        summary: ev.title,
+        start: { dateTime: at(ev.startTime) },
+        end: { dateTime: at(ev.endTime) }
+      })
+    })
+    if (!res.ok) throw new Error(`Google Calendar: ${res.status} ${await res.text()}`)
+    const mapped = mapGoogleEvent((await res.json()) as RawGoogleEvent)
+    return mapped ? { ...mapped, calendarId } : null
+  }
+
+  /** Delete one event from ONE calendar — same rule as createEvent:
+   *  the caller has already verified this is the writable calendar. */
+  async deleteEvent(calendarId: string, eventId: string): Promise<void> {
+    const accessToken = await this.freshAccessToken()
+    const res = await fetch(
+      `${API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+      { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } }
+    )
+    // 410 = already gone — deleting twice is not an error.
+    if (!res.ok && res.status !== 410)
+      throw new Error(`Google Calendar: ${res.status} ${await res.text()}`)
   }
 
   private saveTokens(t: TokenResponse, refreshToken: string): void {
@@ -200,4 +283,11 @@ function waitForCode(server: Server): Promise<string> {
 function localDayStart(date: string, nextDay = false): Date {
   const [y, m, d] = date.split('-').map(Number)
   return new Date(y, m - 1, d + (nextDay ? 1 : 0))
+}
+
+/** Local wall-clock date+time ('2026-09-09', '14:30') as a Date. */
+function localDateTime(date: string, time: string): Date {
+  const [y, m, d] = date.split('-').map(Number)
+  const [hh, mm] = time.split(':').map(Number)
+  return new Date(y, m - 1, d, hh, mm)
 }
