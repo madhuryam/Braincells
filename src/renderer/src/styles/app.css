@@ -1524,6 +1524,15 @@ kbd.key {
   position: static;
   height: 100%;
   max-height: none;
+  /* A column, so the peek body can flex to EXACTLY the leftover height
+     (min-height:100% on the body ignored any header above it and
+     overshot — an empty peek opened already scrolled). */
+  display: flex;
+  flex-direction: column;
+}
+
+.timeline-peek .detail-panel > .detail-panel-header {
+  flex-shrink: 0;
 }
 
 /* The schedule scrolls inside its pane instead of stretching the page. */
@@ -2024,7 +2033,14 @@ kbd.key {
    clipped to a card-sized strip. The flex chain threads through
    EditorContent's anonymous wrapper (the .peek-canvas trick). */
 .detail-panel .task-peek {
-  min-height: 100%;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Fresh notes start as a modest strip that only grows with content —
+   the panel must not open pre-scrolled just to honor a tall minimum. */
+.detail-panel .notes-fill .ProseMirror {
+  min-height: 96px;
 }
 
 /* Only the notes may absorb the column's spare height. Everything
@@ -2390,6 +2406,69 @@ kbd.key {
   /* the .canvas inside scrolls */
 }
 
+/* ── Settings: a popup with categories down the left ──────────────── */
+.settings-split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.settings-nav {
+  width: 216px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 20px 12px 16px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-sunken);
+  overflow-y: auto;
+}
+
+.settings-nav h1 {
+  font-size: 20px;
+  margin: 0 10px 14px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--text-soft);
+}
+
+.settings-nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.settings-nav-item.on {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* Which build is running — tucked at the foot of the category rail. */
+.settings-version {
+  margin-top: auto;
+  padding: 10px 10px 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.settings-body {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 22px 40px;
+}
+
 .overlay-close {
   position: absolute;
   top: 14px;
@@ -2524,6 +2603,54 @@ kbd.key {
 
 .meeting-description a {
   color: var(--accent);
+}
+
+/* ── Signals: the ≤5 "what happens next" tasks ─────────────────────
+   A golden wash whose loudness scales with the slot (1 loudest). The
+   rules sit after .card.accented so a signal outdresses the project
+   tint; the left edge swaps to the signal color while it holds. */
+.card.signal-p1,
+.card.signal-p2,
+.card.signal-p3,
+.card.signal-p4,
+.card.signal-p5 {
+  border-left: 3.5px solid var(--signal, #eab308);
+}
+
+.card.signal-p1 { background: linear-gradient(90deg, color-mix(in srgb, var(--signal, #eab308) 26%, transparent), transparent 70%); }
+.card.signal-p2 { background: linear-gradient(90deg, color-mix(in srgb, var(--signal, #eab308) 19%, transparent), transparent 62%); }
+.card.signal-p3 { background: linear-gradient(90deg, color-mix(in srgb, var(--signal, #eab308) 13%, transparent), transparent 55%); }
+.card.signal-p4 { background: linear-gradient(90deg, color-mix(in srgb, var(--signal, #eab308) 8%, transparent), transparent 48%); }
+.card.signal-p5 { background: linear-gradient(90deg, color-mix(in srgb, var(--signal, #eab308) 5%, transparent), transparent 42%); }
+
+/* The little ⚡n marker on cards and subtask rows — quiet text, not a
+   pill; louder slots read a touch stronger. */
+.signal-flag {
+  font-size: 12px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--signal, #b45309) 80%, var(--text));
+  flex-shrink: 0;
+}
+
+.signal-flag.sp1 {
+  font-size: 13px;
+}
+
+.signal-flag.sp4,
+.signal-flag.sp5 {
+  opacity: 0.75;
+}
+
+.signal-picker {
+  gap: 4px;
+  padding: 2px 6px;
+}
+
+.signal-picker-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-faint);
+  margin-right: 2px;
 }
 
 /* A link is a little card, not a pill: the service's icon leading, the

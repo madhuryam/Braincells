@@ -16,7 +16,6 @@ import { fallbackLabelHex, normLabelId } from '../state/labels'
 import { Card } from '../components/Card'
 import { ProjectPicker } from '../components/ProjectPicker'
 import { DEFAULT_TIME_ZONE } from '../components/Sidebar'
-import { BackButton } from '../components/bits'
 import { ampm } from '../format'
 import {
   CHIME_INTERVALS,
@@ -29,6 +28,75 @@ import {
 } from '../chime'
 
 type CalendarMode = 'demo' | 'google' | 'off'
+
+/** The left-hand nav of the Settings popup — one pane per category. */
+const SETTINGS_CATEGORIES = [
+  { id: 'appearance', label: 'Appearance', icon: '🎨' },
+  { id: 'time', label: 'Time & timeline', icon: '🕐' },
+  { id: 'chime', label: 'Chime', icon: '🔔' },
+  { id: 'calendar', label: 'Calendar', icon: '📅' },
+  { id: 'labels', label: 'Calendar labels', icon: '🏷️' },
+  { id: 'backup', label: 'Backup & reset', icon: '💾' },
+  { id: 'trash', label: 'Deleted canvases', icon: '🗑️' }
+] as const
+type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number]['id']
+
+/**
+ * Which subscribed calendar this connection reads. Named explicitly —
+ * "connected" alone said nothing — and marked for what it is: the app
+ * NEVER writes to it (every write path is pinned to the separate
+ * writable calendar and re-verified against Google's calendar list).
+ */
+function ConnectedCalendarLine(): React.JSX.Element {
+  const calendars = useLiveQuery(() => window.api.listGoogleCalendars(), [])
+  const primary = calendars?.find((c) => c.primary)
+  return (
+    <span
+      className="pill"
+      title="braincells only ever reads this calendar — ad-hoc meetings go to the separate writable one below"
+    >
+      Connected to “{primary?.summary ?? 'Google Calendar'}” — read-only
+    </span>
+  )
+}
+
+/**
+ * Which Google calendar ad-hoc meetings land on. The subscribed
+ * (primary) calendar is read-only BY POLICY — the app never writes to
+ * it — so this offers only other calendars the account can write to.
+ * Older connections were granted read-only scope; creating events
+ * needs one Disconnect → Connect to grant the events scope.
+ */
+function WritableCalendarPicker(): React.JSX.Element {
+  const mutate = useMutate()
+  const calendars = useLiveQuery(() => window.api.listGoogleCalendars(), [])
+  const writableId = useLiveQuery(() => window.api.getSetting<string>('writableCalendarId'), [])
+  const candidates = (calendars ?? []).filter((c) => !c.primary)
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      <label className="row" style={{ gap: 8, fontSize: 14 }}>
+        Ad-hoc meetings calendar
+        <select
+          value={writableId ?? ''}
+          onChange={(e) =>
+            mutate(() => window.api.setSetting('writableCalendarId', e.target.value || null))
+          }
+        >
+          <option value="">none — meeting creation off</option>
+          {candidates.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.summary}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p style={{ margin: 0, color: 'var(--text-soft)', fontSize: 13.5 }}>
+        Huddles and calls created from the timeline are written HERE, never to the subscribed
+        calendar. {candidates.length === 0 && 'No writable secondary calendars found — create one in Google Calendar, or reconnect to grant the write scope.'}
+      </p>
+    </div>
+  )
+}
 
 export function Settings(): React.JSX.Element {
   const { theme, setTheme, showDuePill, setShowDuePill } = useData()
@@ -61,6 +129,7 @@ export function Settings(): React.JSX.Element {
         ...patch
       })
     )
+  const [category, setCategory] = useState<SettingsCategory>('appearance')
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
   const [connecting, setConnecting] = useState(false)
@@ -92,13 +161,24 @@ export function Settings(): React.JSX.Element {
   }
 
   return (
-    <div className="canvas">
-      <header className="canvas-header">
-        <BackButton />
+    <div className="settings-split">
+      <aside className="settings-nav">
         <h1>Settings</h1>
-      </header>
+        {SETTINGS_CATEGORIES.map((c) => (
+          <button
+            key={c.id}
+            className={`settings-nav-item ${category === c.id ? 'on' : ''}`}
+            onClick={() => setCategory(c.id)}
+          >
+            <span aria-hidden>{c.icon}</span> {c.label}
+          </button>
+        ))}
+        {version && <span className="settings-version">braincells v{version}</span>}
+      </aside>
 
-      <div className="stack" style={{ gap: 16 }}>
+      <div className="settings-body stack" style={{ gap: 16 }}>
+        {category === 'appearance' && (
+        <>
         <Card className="stack">
           <h2>Theme</h2>
           <div className="row" style={{ flexWrap: 'wrap' }}>
@@ -164,6 +244,10 @@ export function Settings(): React.JSX.Element {
           </p>
         </Card>
 
+</>
+        )}
+        {category === 'time' && (
+        <>
         <Card className="stack">
           <h2>Time zone</h2>
           <p style={{ margin: 0, color: 'var(--text-soft)' }}>
@@ -228,6 +312,10 @@ export function Settings(): React.JSX.Element {
           </div>
         </Card>
 
+</>
+        )}
+        {category === 'chime' && (
+        <>
         <Card className="stack">
           <h2>Interval chime</h2>
           <p style={{ margin: 0, color: 'var(--text-soft)' }}>
@@ -308,6 +396,10 @@ export function Settings(): React.JSX.Element {
           </div>
         </Card>
 
+</>
+        )}
+        {category === 'calendar' && (
+        <>
         <Card className="stack">
           <h2>Calendar</h2>
           <p style={{ margin: 0, color: 'var(--text-soft)' }}>
@@ -345,15 +437,18 @@ export function Settings(): React.JSX.Element {
           {mode === 'google' && (
             <div className="stack" style={{ marginTop: 8 }}>
               {google?.connected ? (
-                <div className="row">
-                  <span className="pill">✅ Connected (read-only)</span>
-                  <button
-                    className="btn"
-                    onClick={() => mutate(() => window.api.googleDisconnect())}
-                  >
-                    Disconnect
-                  </button>
-                </div>
+                <>
+                  <div className="row">
+                    <ConnectedCalendarLine />
+                    <button
+                      className="btn"
+                      onClick={() => mutate(() => window.api.googleDisconnect())}
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                  <WritableCalendarPicker />
+                </>
               ) : (
                 <>
                   <p style={{ margin: 0, color: 'var(--text-soft)', fontSize: 14 }}>
@@ -388,8 +483,16 @@ export function Settings(): React.JSX.Element {
           )}
         </Card>
 
+</>
+        )}
+        {category === 'labels' && (
+        <>
         <CalendarLabelsCard />
 
+</>
+        )}
+        {category === 'backup' && (
+        <>
         <Card className="stack">
           <h2>Backup</h2>
           <p style={{ margin: 0, color: 'var(--text-soft)' }}>
@@ -423,8 +526,16 @@ export function Settings(): React.JSX.Element {
           {backupNote && <p style={{ margin: 0, color: 'var(--ok)' }}>{backupNote}</p>}
         </Card>
 
+</>
+        )}
+        {category === 'trash' && (
+        <>
         <DeletedCanvasesCard />
 
+</>
+        )}
+        {category === 'backup' && (
+        <>
         <Card className="stack">
           <h2>Start over</h2>
           <p style={{ margin: 0, color: 'var(--text-soft)' }}>
@@ -441,12 +552,7 @@ export function Settings(): React.JSX.Element {
             </button>
           </div>
         </Card>
-
-        {/* A quiet footnote, not a card — which build is running. */}
-        {version && (
-          <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--text-faint)' }}>
-            braincells v{version}
-          </p>
+        </>
         )}
       </div>
     </div>
@@ -462,7 +568,15 @@ function DeletedCanvasesCard(): React.JSX.Element | null {
   const mutate = useMutate()
   const { projects } = useData()
   const pages = useLiveQuery(() => window.api.droppedPages(), []) ?? []
-  if (pages.length === 0) return null
+  if (pages.length === 0)
+    return (
+      <Card className="stack">
+        <h2>Deleted canvases</h2>
+        <p style={{ margin: 0, color: 'var(--text-faint)' }}>
+          The trash is empty. Deleted canvases wait here for 30 days before they're gone for good.
+        </p>
+      </Card>
+    )
 
   return (
     <Card className="stack">

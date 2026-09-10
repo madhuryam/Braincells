@@ -117,7 +117,7 @@ function Overlay(): React.JSX.Element | null {
 
 /** App-wide shortcuts. ⌘N: jump to Today and start capturing. */
 function Shortcuts(): null {
-  const { navigate } = useNav()
+  const { navigate, openOverlay } = useNav()
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.metaKey && e.key.toLowerCase() === 'n') {
@@ -135,15 +135,16 @@ function Shortcuts(): null {
         navigate({ name: 'search' })
         requestAnimationFrame(() => document.getElementById('search-input')?.focus())
       }
-      // ⌘, → Settings (the macOS-standard preferences shortcut).
+      // ⌘, → Settings (the macOS-standard preferences shortcut) — a
+      // popup over wherever you are, not a page you navigate away to.
       if (e.metaKey && e.key === ',') {
         e.preventDefault()
-        navigate({ name: 'settings' })
+        openOverlay({ name: 'settings' })
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [navigate])
+  }, [navigate, openOverlay])
   return null
 }
 
