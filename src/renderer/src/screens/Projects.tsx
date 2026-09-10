@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import type { Project } from '@shared/types'
 import { useData, useLiveQuery, useMutate } from '../state/data'
 import { useNav } from '../state/nav'
+import { shortTitle, useUndo } from '../state/undo'
 import { Card } from '../components/Card'
 import { BackButton, EmptyState, ProjectDot } from '../components/bits'
 import { PROJECT_COLORS, randomProjectColor } from '../palette'
@@ -99,6 +100,7 @@ export function Projects(): React.JSX.Element {
   const { projects } = useData()
   const { navigate } = useNav()
   const mutate = useMutate()
+  const { pushUndo } = useUndo()
   const [name, setName] = useState('')
   const [color, setColor] = useState<string>(randomProjectColor())
   const [nameError, setNameError] = useState<string | null>(null)
@@ -233,6 +235,9 @@ export function Projects(): React.JSX.Element {
                 onClick={(e) => {
                   e.stopPropagation()
                   mutate(() => window.api.updateProject(p.id, { status: 'archived' }))
+                  pushUndo(`Archived “${shortTitle(p.name)}”`, async () => {
+                    await window.api.updateProject(p.id, { status: 'active' })
+                  })
                 }}
               >
                 Archive
@@ -274,6 +279,9 @@ export function Projects(): React.JSX.Element {
                     onClick={(e) => {
                       e.stopPropagation()
                       mutate(() => window.api.updateProject(p.id, { status: 'active' }))
+                      pushUndo(`Restored “${shortTitle(p.name)}”`, async () => {
+                        await window.api.updateProject(p.id, { status: 'archived' })
+                      })
                     }}
                   >
                     Restore

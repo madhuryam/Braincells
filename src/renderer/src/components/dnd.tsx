@@ -254,6 +254,18 @@ export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element
     }
 
     const { item, sortableIds } = active.data.current as DragData
+    // Everything a filing/scheduling drop can overwrite — captured once
+    // so every branch hands ⌘Z the exact previous home.
+    const prevHome = {
+      scheduledDate: item.scheduledDate,
+      projectId: item.projectId,
+      sectionId: item.sectionId,
+      status: item.status
+    }
+    const undoToHome = (label: string): void =>
+      pushUndo(label, async () => {
+        await window.api.updateItem(item.id, prevHome)
+      })
     const overData = over.data.current as
       | {
           type?: string
@@ -277,6 +289,7 @@ export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element
           ...(item.status === 'inbox' ? { status: 'active' as const } : {})
         })
       )
+      undoToHome(`Filed “${shortTitle(item.title)}”`)
       return
     }
 
@@ -333,11 +346,16 @@ export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element
     // Dropping a card on a meeting attaches it as prep (SPEC §7).
     if (overData?.type === 'event-prep' && overData.event) {
       const event = overData.event
+      const prevStatus = item.status
       mutate(async () => {
-        await window.api.linkToEvent(item.id, event, 'prep-for')
+        const link = await window.api.linkToEvent(item.id, event, 'prep-for')
         if (item.status === 'inbox') {
           await window.api.updateItem(item.id, { status: 'active' })
         }
+        pushUndo(`Attached “${shortTitle(item.title)}” as prep`, async () => {
+          await window.api.deleteLink(link.id)
+          await window.api.updateItem(item.id, { status: prevStatus })
+        })
       })
       return
     }
@@ -355,6 +373,7 @@ export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element
           ...(item.status === 'inbox' ? { status: 'active' as const } : {})
         })
       )
+      undoToHome(`Filed “${shortTitle(item.title)}”`)
       return
     }
 
@@ -368,6 +387,7 @@ export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element
           ...(item.status === 'inbox' ? { status: 'active' as const } : {})
         })
       )
+      undoToHome(`Moved “${shortTitle(item.title)}”`)
       return
     }
 
@@ -379,6 +399,7 @@ export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element
           ...(item.status === 'inbox' ? { status: 'active' as const } : {})
         })
       )
+      undoToHome(`Moved “${shortTitle(item.title)}”`)
       return
     }
 
@@ -394,6 +415,9 @@ export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element
         setPendingOrder(newOrder)
         try {
           await mutate(() => window.api.reorderItems(newOrder))
+          pushUndo(`Reordered “${shortTitle(item.title)}”`, async () => {
+            await window.api.reorderItems(sortableIds)
+          })
         } finally {
           // Always clear: on success the DB now matches so the swap is a
           // no-op; on failure a phantom order must not stick around.
@@ -417,6 +441,7 @@ export function AppDnd({ children }: { children: ReactNode }): React.JSX.Element
           ...(item.status === 'inbox' ? { status: 'active' as const } : {})
         })
       )
+      undoToHome(`Moved “${shortTitle(item.title)}”`)
     }
   }
 
