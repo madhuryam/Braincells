@@ -6,6 +6,43 @@ hand as part of cutting a release — the process lives in
 shipped without git tags; their tags were added retroactively, dated
 to their version commits.
 
+## v1.2.0 — 2026-09-09
+
+- **Ad-hoc meetings on a second calendar.** Settings names the
+  subscribed calendar ("Connected to … — read-only") and offers a
+  separate WRITABLE calendar for huddles and calls. Drawing a range on
+  the timeline now has a task | meeting toggle: meeting mode creates a
+  real Google event (with a project, via the same filing meetings
+  use), opens it immediately, and it behaves like any meeting — prep,
+  follow-ups, notes. A mistyped task converts via right-click ("Make
+  it a meeting"); ad-hoc meetings delete from their peek's title bar.
+  Every write is pinned to the writable calendar and re-verified
+  against Google's calendar list — the subscribed calendar is never
+  written to.
+- **Signals: the five "what happens next" tasks.** Right-click a task
+  card, subtask row, or use the task peek to claim priority slot 1–5
+  (one task per slot — claiming takes it over, which is the cap). A
+  golden wash scales with loudness; a signaled subtask floats its
+  parent to the top of its subsection without highlighting it; the ⚡
+  button filters the day to signals only. Finishing a task frees its
+  slot.
+- **Canvas archive.** 🗄 on a canvas (title bar, or right-click on the
+  project page) shelves it: read-only until unarchived, in a collapsed
+  Archived list on its project page, out of the sidebar's canvas menu.
+- **⌘Z always undoes the LAST thing.** Every destructive action now
+  logs its inverse — remove-from-calendar rebuilds all its blocks,
+  meeting unlinks restore the due date, batch triage restores every
+  item, drag-drops return to the previous home, and more. (The bug:
+  removing from calendar wasn't logged, so ⌘Z undid something older.)
+- **Settings is a popup** — over wherever you are, with categories
+  down the left (Appearance, Time & timeline, Chime, Calendar, labels,
+  Backup & reset, Deleted canvases); the version sits at the rail's
+  foot.
+- **Task peek polish.** Controls share the title line (delete 🗑 with
+  a two-step confirm, the new overlapping-windows popup icon, ✕), and
+  an empty peek no longer opens pre-scrolled — notes start modest and
+  grow.
+
 ## v1.1.1 — 2026-09-02
 
 - **Timeline right-click works from any day.** The block menu now finds
