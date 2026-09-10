@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import { useLiveQuery, useMutate } from '../state/data'
+import { shortTitle, useUndo } from '../state/undo'
 import { CheckableInput, Checkbox } from './bits'
+import { ConfirmButton } from './ConfirmButton'
+import { PopOutIcon } from './DetailPanel'
 import { ProjectPicker } from './ProjectPicker'
 import { SectionPicker } from './SectionPicker'
+import { SignalPicker } from './SignalPicker'
 import { createSubtask, SubtaskTree } from './SubtaskTree'
 import { LinkChips } from './LinkChips'
 import { extractLinksFromHtml } from '../links'
@@ -63,7 +67,8 @@ function TimeField({
 export function TaskPeek({
   itemId,
   localEventId = null,
-  onClose
+  onClose,
+  onOpenFull
 }: {
   itemId: string
   /** Set when the peek opened from the task's EXTRA block (a linked
@@ -73,6 +78,9 @@ export function TaskPeek({
   /** Called when the task leaves the calendar — the block this peek
    *  belongs to is gone, so the panel goes with it. */
   onClose?: () => void
+  /** Open the task as a full canvas overlay — rendered as the popup
+   *  button on the title line, beside ✕ (the panel adds no header). */
+  onOpenFull?: () => void
 }): React.JSX.Element | null {
   const item = useLiveQuery(() => window.api.getItem(itemId), [itemId])
   // A subtask's block only says its own title — the lineage line adds
@@ -93,6 +101,7 @@ export function TaskPeek({
   const subtaskTree = useLiveQuery(() => window.api.subtaskTreeOf(itemId), [itemId]) ?? []
   const [subDraft, setSubDraft] = useState('')
   const mutate = useMutate()
+  const { pushUndo } = useUndo()
   // Title: local draft only while focused; idle, the input mirrors
   // item.title so renames made elsewhere land here (ItemDetail's rule).
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
@@ -131,8 +140,27 @@ export function TaskPeek({
       )
   }
   const offCalendar = (): void => {
-    if (!isExtra) void patch({ scheduledTime: null, timeEstimateMinutes: null })
-    else if (local) void mutate(() => window.api.deleteLocalEvent(local.id))
+    if (!isExtra) {
+      const prev = { scheduledTime: item.scheduledTime, timeEstimateMinutes: item.timeEstimateMinutes }
+      void patch({ scheduledTime: null, timeEstimateMinutes: null })
+      pushUndo(`Took “${shortTitle(item.title)}” off the calendar`, async () => {
+        await window.api.updateItem(item.id, prev)
+      })
+    } else if (local) {
+      // Snapshot the block before deleting — ⌘Z rebuilds it.
+      const b = { ...local }
+      void mutate(() => window.api.deleteLocalEvent(local.id))
+      pushUndo(`Removed a block of “${shortTitle(item.title)}”`, async () => {
+        await window.api.createLocalEvent({
+          title: b.title,
+          date: b.date,
+          startTime: b.startTime,
+          endTime: b.endTime,
+          projectId: b.projectId,
+          itemId: b.itemId
+        })
+      })
+    }
     onClose?.()
   }
 
@@ -158,6 +186,37 @@ export function TaskPeek({
           }}
           onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
         />
+        {/* Panel controls share the title line — a header row of their
+            own pushed everything down and split the top of the peek. */}
+        <span className="row" style={{ marginLeft: 'auto', flexShrink: 0 }}>
+          {/* Two-step: the 🗑 arms into a confirm, so a stray click
+              near ✕ can't discard the task. Undoable either way. */}
+          <ConfirmButton
+            label="🗑"
+            confirmLabel="🗑?"
+            className="btn ghost icon-btn"
+            style={{ fontSize: 13 }}
+            title="Delete this task (it goes away, guilt-free)"
+            onConfirm={() => {
+              const prev = item.status
+              void mutate(() => window.api.updateItem(item.id, { status: 'dropped' }))
+              pushUndo(`Dropped “${shortTitle(item.title)}”`, async () => {
+                await window.api.updateItem(item.id, { status: prev })
+              })
+              onClose?.()
+            }}
+          />
+          {onOpenFull && (
+            <button className="btn ghost icon-btn" title="Open full view" onClick={onOpenFull}>
+              <PopOutIcon />
+            </button>
+          )}
+          {onClose && (
+            <button className="btn ghost icon-btn" title="Close panel" onClick={onClose}>
+              ✕
+            </button>
+          )}
+        </span>
       </div>
 
       {/* Where this piece belongs: the whole chain, outermost first. */}
@@ -242,6 +301,12 @@ export function TaskPeek({
         </button>
       </div>
 
+      {/* Which of the five "what happens next" slots this task holds. */}
+      <SignalPicker
+        value={item.signalPriority}
+        onPick={(p) => void mutate(() => window.api.setSignal(item.id, p))}
+      />
+
       <ProjectPicker value={item.projectId} onChange={(projectId) => patch({ projectId })} />
       {/* Once a project is picked, its sections offer themselves —
           file the task into a subsection, not just project General. */}
@@ -271,7 +336,13 @@ export function TaskPeek({
       <LinkChips
         links={item.links}
         derived={extractLinksFromHtml(item.richContent ?? '')}
-        onSave={(next) => patch({ links: next })}
+        onSave={(next) => {
+          const prev = item.links
+          void patch({ links: next })
+          pushUndo(`Changed “${shortTitle(item.title)}”’s links`, async () => {
+            await window.api.updateItem(item.id, { links: prev })
+          })
+        }}
       />
 
       {/* The same Notes section a meeting's panel shows — shared

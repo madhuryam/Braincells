@@ -6,6 +6,7 @@ import { durationLabel, KIND_ICON, prettyDate, projectLabel } from '../format'
 import { LinkChips } from './LinkChips'
 import { extractLinksFromHtml } from '../links'
 import { ItemNotes } from './ItemNotes'
+import { PopOutIcon } from './DetailPanel'
 
 /**
  * Single-item view for the detail panel: a single header row (title,
@@ -85,7 +86,7 @@ export function ItemDetail({
             title="Open canvas"
             onClick={() => openOverlay({ name: 'page', itemId: item.id })}
           >
-            ↗
+            <PopOutIcon />
           </button>
         )}
         {onClose && (
