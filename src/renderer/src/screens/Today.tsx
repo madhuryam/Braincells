@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { todayYmd, ymdAddDays } from '@shared/dates'
 import { useLiveQuery, useMutate } from '../state/data'
+import { useSignalRoots } from '../state/signals'
 import { useEditing } from '../state/editing'
 import { useNav } from '../state/nav'
 import { MeetingPeekProvider } from '../state/peek'
@@ -10,7 +11,7 @@ import { DetailPanel } from '../components/DetailPanel'
 import { DoneList } from '../components/DoneList'
 import { MiniCalendar } from '../components/MiniCalendar'
 import { TaskPeek } from '../components/TaskPeek'
-import { Meeting } from './Meeting'
+import { AdHocDeleteButton, Meeting } from './Meeting'
 import { ItemCard } from '../components/ItemCard'
 import { TaskGroups } from '../components/TaskGroups'
 import { ProjectPicker } from '../components/ProjectPicker'
@@ -80,6 +81,11 @@ export function Today(): React.JSX.Element {
   // Everything shows by default — "Show fewer" is the opt-in trim,
   // not the other way around.
   const [showAll, setShowAll] = useState(true)
+  // ⚡ filter: only the signal tasks — across every project and
+  // subsection of the day's list (a signaled SUBTASK keeps its whole
+  // card in view). Session-only, like the folds.
+  const [signalsOnly, setSignalsOnly] = useState(false)
+  const signalRoots = useSignalRoots()
   // The header's collapse-all/expand-all for the day's project blocks;
   // each click broadcasts (seq bump), then blocks toggle freely again.
   const [fold, setFold] = useState({ seq: 0, collapsed: false })
@@ -139,7 +145,9 @@ export function Today(): React.JSX.Element {
     }
   }, [peek, peekTask])
 
-  const visibleTasks = showAll ? tasks : tasks.slice(0, TOP_TASK_CAP)
+  const dayTasks =
+    signalsOnly && signalRoots ? tasks.filter((t) => signalRoots.has(t.id)) : tasks
+  const visibleTasks = showAll ? dayTasks : dayTasks.slice(0, TOP_TASK_CAP)
 
   // Straight onto today's list — no inbox detour for things you
   // already know are tasks for today.
@@ -213,6 +221,19 @@ export function Today(): React.JSX.Element {
                       onKeyDown={(e) => e.key === 'Enter' && addTask()}
                     />
                   </div>
+                  {/* ⚡ trims the day to just the signals; the chevron
+                    beside it packs the whole column up. */}
+                  <button
+                    className={`btn icon-btn ${signalsOnly ? 'primary' : 'ghost'}`}
+                    title={
+                      signalsOnly
+                        ? 'Showing only signals — click for everything'
+                        : 'Show only signals (what happens next)'
+                    }
+                    onClick={() => setSignalsOnly(!signalsOnly)}
+                  >
+                    ⚡
+                  </button>
                   {/* Hugs the task list's top-right corner: one click
                     folds/unfolds every project block below AND the
                     Coming up section — the whole column packs up. */}
@@ -363,6 +384,13 @@ export function Today(): React.JSX.Element {
               >
                 <DetailPanel
                   title={peek.title}
+                  actions={
+                    <AdHocDeleteButton
+                      eventKey={peek.eventKey}
+                      date={peek.date}
+                      onDeleted={closePeeks}
+                    />
+                  }
                   onOpenFull={() =>
                     openOverlay({ name: 'meeting', eventKey: peek.eventKey, title: peek.title, date: peek.date })
                   }
@@ -374,6 +402,7 @@ export function Today(): React.JSX.Element {
                     eventKey={peek.eventKey}
                     title={peek.title}
                     date={peek.date}
+                    onDeleted={closePeeks}
                   />
                 </DetailPanel>
               </div>
@@ -383,15 +412,15 @@ export function Today(): React.JSX.Element {
                 className="timeline-peek"
                 style={peekBox ? { right: peekBox.right, width: peekBox.width } : undefined}
               >
-                <DetailPanel
-                  onOpenFull={() => openOverlay({ name: 'page', itemId: peekTask.itemId })}
-                  onClose={() => setPeekTask(null)}
-                >
+                {/* No panel header — the peek's own title line carries
+                    the popup/close buttons, so nothing sits above it. */}
+                <DetailPanel>
                   <TaskPeek
                     key={`${peekTask.itemId}:${peekTask.localEventId ?? 'own'}`}
                     itemId={peekTask.itemId}
                     localEventId={peekTask.localEventId ?? null}
                     onClose={closePeeks}
+                    onOpenFull={() => openOverlay({ name: 'page', itemId: peekTask.itemId })}
                   />
                 </DetailPanel>
               </div>

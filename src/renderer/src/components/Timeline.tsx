@@ -636,6 +636,11 @@ export function Timeline({
                 initialEnd={toHHMM(pending.end)}
                 top={Math.max(0, Math.min(y(pending.start), totalHeight - 150))}
                 onClose={() => setPending(null)}
+                onMeetingCreated={(ev) =>
+                  onPeekEvent
+                    ? onPeekEvent(ev)
+                    : openOverlay({ name: 'meeting', ...ev })
+                }
               />
             )}
 
@@ -665,6 +670,9 @@ export function Timeline({
           x={taskMenu.x}
           y={taskMenu.y}
           onClose={() => setTaskMenu(null)}
+          openMeeting={(ev) =>
+            onPeekEvent ? onPeekEvent(ev) : openOverlay({ name: 'meeting', ...ev })
+          }
         />
       )}
     </div>
@@ -688,7 +696,8 @@ function TaskBlockMenu({
   localEventId = null,
   x,
   y,
-  onClose
+  onClose,
+  openMeeting
 }: {
   taskId: string
   /** The day whose timeline the menu opened on — done on a past day
@@ -699,11 +708,18 @@ function TaskBlockMenu({
   x: number
   y: number
   onClose: () => void
+  /** Open a (freshly converted) meeting in the peek/overlay. */
+  openMeeting?: (ev: { eventKey: string; title: string; date: string }) => void
 }): React.JSX.Element | null {
   const mutate = useMutate()
   const { pushUndo } = useUndo()
   const [dropArmed, setDropArmed] = useState(false)
   const task = useLiveQuery(() => window.api.getItem(taskId), [taskId])
+  // "Should have been a meeting": offered when a writable calendar is
+  // configured — the block's task becomes a real event on it.
+  const writableCal = useLiveQuery(() => window.api.getSetting<string>('writableCalendarId'), [])
+  const [convertError, setConvertError] = useState<string | null>(null)
+  const [converting, setConverting] = useState(false)
   // Picking a project swaps the chips for that project's sections, so
   // filing goes all the way into a subsection without leaving the
   // menu. Tracked locally (not off the task) so the swap is instant
@@ -761,15 +777,92 @@ function TaskBlockMenu({
         }
         onClick={() => {
           onClose()
-          void mutate(() =>
-            localEventId
-              ? window.api.deleteLocalEvent(localEventId)
-              : window.api.updateItem(task.id, { scheduledTime: null, timeEstimateMinutes: null })
-          )
+          if (localEventId) {
+            // Snapshot the block before deleting — ⌘Z rebuilds it.
+            void mutate(async () => {
+              const b = await window.api.getLocalEvent(localEventId)
+              await window.api.deleteLocalEvent(localEventId)
+              if (b) {
+                pushUndo(`Removed a block of “${shortTitle(task.title)}”`, async () => {
+                  await window.api.createLocalEvent({
+                    title: b.title,
+                    date: b.date,
+                    startTime: b.startTime,
+                    endTime: b.endTime,
+                    projectId: b.projectId,
+                    itemId: b.itemId
+                  })
+                })
+              }
+            })
+          } else {
+            const prev = {
+              scheduledTime: task.scheduledTime,
+              timeEstimateMinutes: task.timeEstimateMinutes
+            }
+            void mutate(() =>
+              window.api.updateItem(task.id, { scheduledTime: null, timeEstimateMinutes: null })
+            )
+            pushUndo(`Took “${shortTitle(task.title)}” off the calendar`, async () => {
+              await window.api.updateItem(task.id, prev)
+            })
+          }
         }}
       >
         ✕ Off calendar
       </button>
+      {writableCal && task.scheduledTime && task.scheduledDate && (
+        <button
+          className="btn ghost small"
+          style={{ justifyContent: 'flex-start' }}
+          disabled={converting}
+          title="Typed a task but meant a meeting? This recreates it as an ad-hoc event on the writable calendar (same times) and removes the task."
+          onClick={async () => {
+            setConverting(true)
+            const res = await window.api.createCalendarEvent({
+              title: task.title,
+              date: task.scheduledDate!,
+              startTime: task.scheduledTime!,
+              endTime: toHHMM(
+                Math.min(toMin(task.scheduledTime!) + (task.timeEstimateMinutes ?? 30), 23 * 60 + 59)
+              )
+            })
+            setConverting(false)
+            if (!res.ok || !res.event) {
+              setConvertError(res.error ?? 'Could not create the meeting')
+              return
+            }
+            const ev = { eventKey: res.event.eventKey, title: res.event.title, date: res.event.date }
+            // The task made way for the meeting; carry its project over.
+            const snapshot = {
+              title: task.title,
+              status: task.status,
+              projectId: task.projectId,
+              sectionId: task.sectionId,
+              scheduledDate: task.scheduledDate,
+              scheduledTime: task.scheduledTime,
+              timeEstimateMinutes: task.timeEstimateMinutes
+            }
+            void mutate(async () => {
+              if (task.projectId) await window.api.assignMeetingProject(ev, task.projectId)
+              await window.api.deleteItem(task.id)
+            })
+            pushUndo(`Made “${shortTitle(task.title)}” a meeting`, async () => {
+              await window.api.deleteCalendarEvent(ev.eventKey)
+              await window.api.createItem({ kind: 'task', ...snapshot })
+            })
+            onClose()
+            openMeeting?.(ev)
+          }}
+        >
+          {converting ? '⏳ Creating meeting…' : '📅 Make it a meeting'}
+        </button>
+      )}
+      {convertError && (
+        <span style={{ padding: '2px 8px', fontSize: 12.5, color: 'var(--danger)' }}>
+          {convertError}
+        </span>
+      )}
       {/* File the block's task into a project without leaving the
           timeline — then straight into one of that project's sections
           (the chips swap once a project is picked). */}
@@ -855,6 +948,7 @@ function LocalEventEditor({
   onClose: () => void
 }): React.JSX.Element {
   const mutate = useMutate()
+  const { pushUndo } = useUndo()
   const [title, setTitle] = useState(ev.title)
   const [start, setStart] = useState(ev.startTime)
   const [end, setEnd] = useState(ev.endTime)
@@ -870,7 +964,13 @@ function LocalEventEditor({
   }
 
   const remove = (): void => {
+    // The editor's fields hold the latest values — snapshot them so
+    // ⌘Z rebuilds the block exactly as it was when deleted.
+    const b = { title, date: ev.date, startTime: start, endTime: end, projectId, itemId: ev.itemId }
     void mutate(() => window.api.deleteLocalEvent(ev.id))
+    pushUndo(`Deleted “${shortTitle(b.title || 'Untitled block')}”`, async () => {
+      await window.api.createLocalEvent(b)
+    })
     onClose()
   }
 
@@ -940,19 +1040,29 @@ function LocalEventEditor({
  * on the first keystroke that names it (guarded so rapid keystrokes
  * can't race); closing while still unnamed discards the draft — no
  * title, no task.
+ *
+ * With a writable calendar configured (Settings), the draft can flip
+ * to MEETING mode instead: Done writes an ad-hoc event (a huddle, a
+ * call) to that calendar — never to the subscribed one — and the
+ * event arrives on the schedule like any other meeting, prep and
+ * follow-ups included.
  */
 function TaskDraftEditor({
   date,
   initialStart,
   initialEnd,
   top,
-  onClose
+  onClose,
+  onMeetingCreated
 }: {
   date: string
   initialStart: string
   initialEnd: string
   top: number
   onClose: () => void
+  /** A created ad-hoc meeting opens straight away — same peek/overlay
+   *  a click on any event gets — so prep and notes start immediately. */
+  onMeetingCreated?: (ev: { eventKey: string; title: string; date: string }) => void
 }): React.JSX.Element {
   const mutate = useMutate()
   const [title, setTitle] = useState('')
@@ -962,6 +1072,61 @@ function TaskDraftEditor({
   const [sectionId, setSectionId] = useState<string | null>(null)
   const idRef = useRef<string | null>(null)
   const creating = useRef<Promise<void> | null>(null)
+  // Meeting mode: offered only when a writable calendar is picked.
+  const writableCal = useLiveQuery(
+    () => window.api.getSetting<string>('writableCalendarId'),
+    []
+  )
+  const [asMeeting, setAsMeeting] = useState(false)
+  const [meetingError, setMeetingError] = useState<string | null>(null)
+  const [savingMeeting, setSavingMeeting] = useState(false)
+
+  const createMeeting = async (): Promise<void> => {
+    const t = title.trim()
+    if (!t) {
+      onClose()
+      return
+    }
+    setSavingMeeting(true)
+    const res = await window.api.createCalendarEvent({
+      title: t,
+      date,
+      startTime: start,
+      endTime: end
+    })
+    setSavingMeeting(false)
+    if (res.ok) {
+      const ev = res.event
+      if (ev) {
+        // The picker's choice files the new meeting exactly like an
+        // existing one — same call the Meeting screen's pill makes.
+        if (projectId) {
+          await window.api.assignMeetingProject(
+            { eventKey: ev.eventKey, title: ev.title, date: ev.date },
+            projectId
+          )
+        }
+        onMeetingCreated?.({ eventKey: ev.eventKey, title: ev.title, date: ev.date })
+      }
+      onClose()
+    } else setMeetingError(res.error ?? 'Could not create the meeting')
+  }
+
+  // Flipping to meeting mode discards any task the keystrokes already
+  // created — one draft, one outcome.
+  const setMode = (meeting: boolean): void => {
+    setAsMeeting(meeting)
+    setMeetingError(null)
+    if (meeting) {
+      void mutate(async () => {
+        if (creating.current) await creating.current
+        if (idRef.current) {
+          await window.api.deleteItem(idRef.current)
+          idRef.current = null
+        }
+      })
+    }
+  }
 
   const save = (patch: {
     title?: string
@@ -970,6 +1135,7 @@ function TaskDraftEditor({
     projectId?: string | null
     sectionId?: string | null
   }): void => {
+    if (asMeeting) return // meetings are created once, on Done — no live draft
     const f = {
       title: patch.title ?? title,
       start: patch.start ?? start,
@@ -1028,12 +1194,35 @@ function TaskDraftEditor({
       // Enter anywhere in the editor = Done; Escape closes. Either way
       // a still-unnamed draft is simply never created.
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === 'Escape') onClose()
+        if (e.key === 'Escape') onClose()
+        else if (e.key === 'Enter') {
+          if (asMeeting) void createMeeting()
+          else onClose()
+        }
       }}
     >
+      {/* What the drawn range becomes. The meeting chip only shows once
+          Settings has a writable calendar to put it on. */}
+      {writableCal && (
+        <div className="row" style={{ gap: 6 }}>
+          <button
+            className={`btn small ${!asMeeting ? 'primary' : 'ghost'}`}
+            onClick={() => setMode(false)}
+          >
+            task
+          </button>
+          <button
+            className={`btn small ${asMeeting ? 'primary' : 'ghost'}`}
+            title="An ad-hoc meeting (huddle, call) — written to the writable calendar, never the subscribed one"
+            onClick={() => setMode(true)}
+          >
+            meeting
+          </button>
+        </div>
+      )}
       <input
         autoFocus
-        placeholder="New task for this time…"
+        placeholder={asMeeting ? 'New meeting for this time…' : 'New task for this time…'}
         value={title}
         onChange={(e) => {
           setTitle(e.target.value)
@@ -1060,13 +1249,26 @@ function TaskDraftEditor({
             if (e.target.value) save({ end: e.target.value })
           }}
         />
-        <button className="btn ghost small" style={{ marginLeft: 'auto' }} onClick={remove}>
-          🗑 delete
-        </button>
-        <button className="btn small primary" onClick={onClose}>
-          Done
+        {!asMeeting && (
+          <button className="btn ghost small" style={{ marginLeft: 'auto' }} onClick={remove}>
+            🗑 delete
+          </button>
+        )}
+        <button
+          className="btn small primary"
+          style={asMeeting ? { marginLeft: 'auto' } : undefined}
+          disabled={savingMeeting}
+          onClick={() => (asMeeting ? void createMeeting() : onClose())}
+        >
+          {asMeeting ? (savingMeeting ? 'Creating…' : 'Create meeting') : 'Done'}
         </button>
       </div>
+      {meetingError && (
+        <span style={{ color: 'var(--danger)', fontSize: 13 }}>{meetingError}</span>
+      )}
+      {/* The project files either outcome — the task directly, the
+          meeting via assignMeetingProject on create. Sections are a
+          task concept only. */}
       <ProjectPicker
         value={projectId}
         onChange={(v) => {
@@ -1076,14 +1278,16 @@ function TaskDraftEditor({
           save({ projectId: v, sectionId: null })
         }}
       />
-      <SectionPicker
-        projectId={projectId}
-        value={sectionId}
-        onChange={(v) => {
-          setSectionId(v)
-          save({ sectionId: v })
-        }}
-      />
+      {!asMeeting && (
+        <SectionPicker
+          projectId={projectId}
+          value={sectionId}
+          onChange={(v) => {
+            setSectionId(v)
+            save({ sectionId: v })
+          }}
+        />
+      )}
     </div>
   )
 }

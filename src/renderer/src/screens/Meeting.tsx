@@ -3,8 +3,11 @@ import { AnimatePresence } from 'framer-motion'
 import DOMPurify from 'dompurify'
 import type { CalendarEvent, Item, Link, AttachedLink } from '@shared/types'
 import { useLiveQuery, useMutate } from '../state/data'
+import { shortTitle, useUndo } from '../state/undo'
 import { useLabels } from '../state/labels'
+import { useNav } from '../state/nav'
 import { Card } from '../components/Card'
+import { ConfirmButton } from '../components/ConfirmButton'
 import { ItemCard } from '../components/ItemCard'
 import { LinkChips } from '../components/LinkChips'
 import { extractLinksFromHtml } from '../links'
@@ -16,12 +19,52 @@ import { RichEditor } from '../components/RichEditor'
 import { itemBodyHtml } from '../richtext'
 import { ampm, prettyDate } from '../format'
 
+/**
+ * The 🗑 for an AD-HOC meeting's peek title bar — renders nothing for
+ * subscribed-calendar events (those are read-only, always). Kept here
+ * with the rest of the ad-hoc logic; Today seats it in the panel
+ * header via DetailPanel's `actions`.
+ */
+export function AdHocDeleteButton({
+  eventKey,
+  date,
+  onDeleted
+}: {
+  eventKey: string
+  date: string
+  onDeleted: () => void
+}): React.JSX.Element | null {
+  const dayEvents = useLiveQuery(() => window.api.calendarEvents(date, date), [date]) ?? []
+  const liveEvent = dayEvents.find((e) => e.eventKey === eventKey)
+  const writableCal = useLiveQuery(() => window.api.getSetting<string>('writableCalendarId'), [])
+  const adHoc = Boolean(liveEvent?.calendarId && writableCal && liveEvent.calendarId === writableCal)
+  if (!adHoc) return null
+  return (
+    <ConfirmButton
+      label="🗑"
+      confirmLabel="🗑?"
+      className="btn ghost icon-btn"
+      style={{ fontSize: 13 }}
+      title="Delete this ad-hoc meeting from the writable calendar (the subscribed calendar is never touched)"
+      onConfirm={async () => {
+        const res = await window.api.deleteCalendarEvent(eventKey)
+        if (res.ok) onDeleted()
+        else console.warn('calendar: delete failed —', res.error)
+      }}
+    />
+  )
+}
+
 interface MeetingProps {
   eventKey: string
   title: string
   date: string
   /** Compact rendering for the detail panel: no header, sections stacked. */
   embedded?: boolean
+  /** Called after this (ad-hoc) meeting is deleted — the embedded peek
+   *  closes itself through this; the full view falls back to closing
+   *  its overlay. */
+  onDeleted?: () => void
 }
 
 /**
@@ -31,7 +74,7 @@ interface MeetingProps {
  * so this screen works identically for past meetings and survives the
  * event being deleted from the calendar.
  */
-export function Meeting({ eventKey, title, date, embedded = false }: MeetingProps): React.JSX.Element {
+export function Meeting({ eventKey, title, date, embedded = false, onDeleted }: MeetingProps): React.JSX.Element {
   const preps = useLiveQuery(() => window.api.itemsForEvent(eventKey, 'prep-for'), [eventKey]) ?? []
   // Lineage for each prep item, so a linked SUBTASK doesn't render as
   // its own standalone card (see the grouping below — same idea as the
@@ -59,6 +102,22 @@ export function Meeting({ eventKey, title, date, embedded = false }: MeetingProp
   const labels = useLabels()
   const label = liveEvent ? labels.of(liveEvent) : undefined
   const mutate = useMutate()
+  const { closeOverlay } = useNav()
+  // Ad-hoc meetings (created by the app on the writable calendar)
+  // carry their source calendarId — the ONLY events deletable here.
+  // Subscribed-calendar events never match: they are read-only.
+  const writableCal = useLiveQuery(() => window.api.getSetting<string>('writableCalendarId'), [])
+  const adHoc = Boolean(liveEvent?.calendarId && writableCal && liveEvent.calendarId === writableCal)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const deleteAdHoc = async (): Promise<void> => {
+    const res = await window.api.deleteCalendarEvent(eventKey)
+    if (!res.ok) {
+      setDeleteError(res.error ?? 'Could not delete the meeting')
+      return
+    }
+    if (onDeleted) onDeleted()
+    else closeOverlay()
+  }
 
   const [prepDraft, setPrepDraft] = useState('')
   const [followUpDraft, setFollowUpDraft] = useState('')
@@ -170,6 +229,19 @@ export function Meeting({ eventKey, title, date, embedded = false }: MeetingProp
     />
   )
 
+  // Only ad-hoc meetings offer deletion — and only from the writable
+  // calendar (the main IPC guard re-verifies the target every time).
+  const deleteButton = adHoc ? (
+    <ConfirmButton
+      label="🗑"
+      confirmLabel="delete meeting?"
+      className="btn ghost icon-btn"
+      style={{ fontSize: 13 }}
+      title="Delete this ad-hoc meeting from the writable calendar (the subscribed calendar is never touched)"
+      onConfirm={() => void deleteAdHoc()}
+    />
+  ) : null
+
   // The event's video call, joined from the title itself: a clickable
   // 📞 beside the name, not a link pill in the chips row.
   const joinCall = liveEvent?.meetLink ? (
@@ -207,8 +279,10 @@ export function Meeting({ eventKey, title, date, embedded = false }: MeetingProp
           </span>
           {labelTag}
           {projectSelect}
+          {deleteButton}
         </header>
       )}
+      {deleteError && <p style={{ color: 'var(--danger)', margin: 0 }}>{deleteError}</p>}
 
       {/* The meeting's attached links (Slack, docs, …) — meeting may
           still be loading/absent; chips render from [] until then. */}
@@ -305,6 +379,7 @@ function PrepList({
   ancestry: Map<string, Item[]> | undefined
 }): React.JSX.Element {
   const mutate = useMutate()
+  const { pushUndo } = useUndo()
   const linkedIds = new Set(preps.map((p) => p.item.id))
   const standalone: typeof preps = []
   const roots = new Map<string, string>() // root id → title, insertion-ordered
@@ -314,12 +389,28 @@ function PrepList({
     else if (anc.some((a) => linkedIds.has(a.id))) continue
     else roots.set(anc[0].id, anc[0].title)
   }
-  const linkOf = new Map(preps.map((p) => [p.item.id, p.link.id]))
+  const linkOf = new Map(preps.map((p) => [p.item.id, p.link]))
   const unlink = (item: Item): void => {
+    const link = linkOf.get(item.id)!
+    const prevDue = item.dueDate
     mutate(async () => {
-      await window.api.deleteLink(linkOf.get(item.id)!)
+      await window.api.deleteLink(link.id)
       // The due date came from this meeting — it goes with the link.
       await window.api.updateItem(item.id, { dueDate: null })
+    })
+    pushUndo(`Removed “${shortTitle(item.title)}” from prep`, async () => {
+      await window.api.linkToEvent(
+        item.id,
+        {
+          eventKey: link.toEventKey!,
+          title: link.eventTitle ?? 'meeting',
+          date: link.eventDate ?? '',
+          startTime: null,
+          endTime: null
+        },
+        'prep-for'
+      )
+      await window.api.updateItem(item.id, { dueDate: prevDue })
     })
   }
   return (
@@ -429,11 +520,18 @@ function AttachedLinks({
   notesHtml: string
 }): React.JSX.Element {
   const mutate = useMutate()
+  const { pushUndo } = useUndo()
   return (
     <LinkChips
       links={links}
       derived={extractLinksFromHtml(notesHtml)}
-      onSave={(next) => mutate(() => window.api.setMeetingLinks(event, next))}
+      onSave={(next) => {
+        const prev = links
+        void mutate(() => window.api.setMeetingLinks(event, next))
+        pushUndo(`Changed “${shortTitle(event.title)}”’s links`, async () => {
+          await window.api.setMeetingLinks(event, prev)
+        })
+      }}
     />
   )
 }
