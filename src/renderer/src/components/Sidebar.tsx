@@ -93,7 +93,13 @@ function ProjectCanvasMenu({
   const mutate = useMutate()
   const items = useLiveQuery(() => window.api.projectItems(projectId), [projectId]) ?? []
   const pages = items
-    .filter((i) => i.kind === 'page' && (i.status === 'active' || i.status === 'inbox'))
+    .filter(
+      (i) =>
+        i.kind === 'page' &&
+        (i.status === 'active' || i.status === 'inbox') &&
+        // Archived canvases live on the project page's shelf, not here.
+        i.archivedAt === null
+    )
     .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))
 
   const newCanvas = async (): Promise<void> => {
@@ -142,7 +148,7 @@ export function Sidebar(): React.JSX.Element {
   // `dark` comes from context state (not the DOM attribute) so the
   // toggle button always re-renders in step with the actual theme.
   const { projects, dark, toggleDark } = useData()
-  const { view, navigate } = useNav()
+  const { view, navigate, openOverlay } = useNav()
   // Auto-collapse: the sidebar rests as a 64px rail and expands while
   // the pointer is over it — unless pinned open (📌, remembered).
   // null = the setting hasn't loaded; treat as expanded to avoid a
@@ -296,7 +302,7 @@ export function Sidebar(): React.JSX.Element {
             <button
               className="btn ghost icon-btn"
               title="Settings"
-              onClick={() => navigate({ name: 'settings' })}
+              onClick={() => openOverlay({ name: 'settings' })}
             >
               ⚙️
             </button>

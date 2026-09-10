@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Item } from '@shared/types'
-import { todayYmd, ymdAddDays } from '@shared/dates'
+import { nowStamp, todayYmd, ymdAddDays } from '@shared/dates'
 import { useData, useLiveQuery, useMutate } from '../state/data'
 import { useNav } from '../state/nav'
 import { MeetingPeekProvider } from '../state/peek'
@@ -124,6 +124,23 @@ function CanvasCard({
         >
           <button
             className="btn ghost small"
+            style={{ justifyContent: 'flex-start' }}
+            // One click, no arming — archiving is gentle and undoable
+            // (the shelf below, or ⌘Z), unlike delete.
+            onClick={() => {
+              setMenu(null)
+              void mutate(() => window.api.updateItem(item.id, { archivedAt: nowStamp() })).then(
+                onDeleted
+              )
+              pushUndo(`Archived “${shortTitle(item.title)}”`, async () => {
+                await window.api.updateItem(item.id, { archivedAt: null })
+              })
+            }}
+          >
+            🗄 Archive
+          </button>
+          <button
+            className="btn ghost small"
             style={{
               justifyContent: 'flex-start',
               ...(deleteArmed ? { color: 'var(--danger)', fontWeight: 700 } : {})
@@ -173,6 +190,8 @@ export function ProjectPage({ projectId }: { projectId: string }): React.JSX.Ele
   const [todosOpen, setTodosOpen] = useState(true)
   // Canvases paginate: freshest 5 first, then +10 per "show more".
   const [canvasesShown, setCanvasesShown] = useState(5)
+  // The archived shelf rests folded — it's a filing cabinet, not the desk.
+  const [archivedOpen, setArchivedOpen] = useState(false)
   // Meetings show one tab at a time (upcoming first — that's what
   // planning needs), revealed a handful at a time.
   const [meetingsOpen, setMeetingsOpen] = useState(true)
@@ -203,9 +222,15 @@ export function ProjectPage({ projectId }: { projectId: string }): React.JSX.Ele
   const open = (items ?? []).filter((i) => i.status === 'active' || i.status === 'inbox')
   // Freshest canvas first — updatedAt is null on pre-migration rows,
   // where createdAt is the best "last touched" we have.
-  const pages = open
+  const allPages = open
     .filter((i) => i.kind === 'page')
     .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))
+  // Archived canvases shelve below the live grid — read-only until
+  // unarchived, and most recently shelved first.
+  const pages = allPages.filter((p) => p.archivedAt === null)
+  const archivedPages = allPages
+    .filter((p) => p.archivedAt !== null)
+    .sort((a, b) => b.archivedAt!.localeCompare(a.archivedAt!))
   // Starred canvases stay in the main list (every canvas listed once);
   // the overview keeps quick links to the starred ones.
   const starredPages = pages.filter((p) => p.starred)
@@ -382,6 +407,48 @@ export function ProjectPage({ projectId }: { projectId: string }): React.JSX.Ele
             <span className="project-section" style={{ color: 'var(--text-faint)', fontSize: 14, display: 'block' }}>
               No canvases yet — a canvas is a full document for brain-dumping knowledge.
             </span>
+          )}
+          {/* The shelf: archived canvases, collapsed by default. Rows,
+              not preview cards — they're records, not working surfaces.
+              Open one to read it; unarchive to edit. */}
+          {archivedPages.length > 0 && (
+            <div className="project-section">
+              <button
+                className="section-label day-toggle"
+                onClick={() => setArchivedOpen(!archivedOpen)}
+              >
+                {archivedOpen ? '▾' : '▸'} Archived
+                <span className="pill">{archivedPages.length}</span>
+              </button>
+              {archivedOpen && (
+                <div className="stack" style={{ gap: 4 }}>
+                  {archivedPages.map((p) => (
+                    <div key={p.id} className="row" style={{ gap: 8 }}>
+                      <button
+                        className="btn ghost small"
+                        style={{ justifyContent: 'flex-start', flex: 1, minWidth: 0 }}
+                        title="Open read-only — unarchive to edit"
+                        onClick={() => openOverlay({ name: 'page', itemId: p.id })}
+                      >
+                        🗄 {p.title || 'Untitled canvas'}
+                      </button>
+                      <span style={{ fontSize: 12, color: 'var(--text-faint)', flexShrink: 0 }}>
+                        archived {p.archivedAt!.slice(0, 10)}
+                      </span>
+                      <button
+                        className="btn ghost small"
+                        title="Unarchive — editable again, back in the grid"
+                        onClick={() =>
+                          void mutate(() => window.api.updateItem(p.id, { archivedAt: null }))
+                        }
+                      >
+                        ↩ unarchive
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </>
       )}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { nowStamp } from '@shared/dates'
 import { useData, useLiveQuery, useMutate } from '../state/data'
 import { useNav } from '../state/nav'
 import { shortTitle, useUndo } from '../state/undo'
@@ -56,6 +57,7 @@ export function Page({ itemId }: { itemId: string }): React.JSX.Element {
   )
 
   if (!item) return <div className="canvas">Canvas not found.</div>
+  const archived = item.archivedAt !== null
 
   return (
     <div className="canvas">
@@ -66,12 +68,29 @@ export function Page({ itemId }: { itemId: string }): React.JSX.Element {
           // A brand-new canvas lands with the cursor in the title —
           // type the name first, no hunting for the field.
           autoFocus={item.title === ''}
+          readOnly={archived}
           value={title}
           placeholder="Untitled canvas"
           onChange={(e) => setTitle(e.target.value)}
           onBlur={() => title !== item.title && mutate(() => window.api.updateItem(itemId, { title }))}
           onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
         />
+        {/* Archived: the one obvious way back to editable, right where
+            the eye lands when typing does nothing. */}
+        {archived && (
+          <button
+            className="btn small primary"
+            title="Bring the canvas back to its project page, editable again"
+            onClick={() => {
+              void mutate(() => window.api.updateItem(itemId, { archivedAt: null }))
+              pushUndo(`Unarchived “${shortTitle(item.title)}”`, async () => {
+                await window.api.updateItem(itemId, { archivedAt: nowStamp() })
+              })
+            }}
+          >
+            Unarchive to edit
+          </button>
+        )}
         {/* The project pill is live: click it to refile the canvas,
             same picker the task peek uses. */}
         <ProjectPicker
@@ -85,6 +104,21 @@ export function Page({ itemId }: { itemId: string }): React.JSX.Element {
         >
           {item.starred ? '⭐' : '☆'}
         </button>
+        {!archived && (
+          <button
+            className="btn ghost icon-btn"
+            title="Archive — shelved (read-only) on the project page, out of the sidebar's canvas list"
+            onClick={() => {
+              void mutate(() => window.api.updateItem(itemId, { archivedAt: nowStamp() }))
+              pushUndo(`Archived “${shortTitle(item.title)}”`, async () => {
+                await window.api.updateItem(itemId, { archivedAt: null })
+              })
+              closeOverlay()
+            }}
+          >
+            🗄
+          </button>
+        )}
         {/* Deleting lives ONLY here, on the full view — where you can
             see everything you're about to lose. Two-step, never one
             click — and soft: the canvas moves to the trash (Settings →
@@ -105,9 +139,11 @@ export function Page({ itemId }: { itemId: string }): React.JSX.Element {
       </header>
 
       {/* Keyed by id: the editor seeds once per page and owns the
-          content from there (no cursor-jumping re-seeds on save). */}
+          content from there (no cursor-jumping re-seeds on save).
+          Archived, the document renders read-only — unarchive to edit. */}
       <RichEditor
         key={item.id}
+        editable={!archived}
         initialHtml={item.richContent ?? ''}
         placeholder="Brain dump here — headings, tables, checklists, whatever helps later-you."
         onChange={onEditorChange}

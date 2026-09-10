@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { Extension } from '@tiptap/core'
 import { EditorContent, useEditor, useEditorState, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -52,6 +52,9 @@ export interface RichEditorProps {
   /** false hides the toolbar entirely (markdown shortcuts still work) —
    *  for tight surfaces like the detail-panel peek. Default true. */
   toolbar?: boolean
+  /** false renders the document read-only (no caret, no toolbar) —
+   *  archived canvases, which must be unarchived to edit. Default true. */
+  editable?: boolean
 }
 
 /** Imperative handle: move focus (caret at end) into the notes. */
@@ -310,7 +313,7 @@ const FONTS: Array<[label: string, css: string]> = [
 ]
 
 export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEditor(
-  { initialHtml, placeholder, onChange, onExit, variant = 'full', toolbar = true },
+  { initialHtml, placeholder, onChange, onExit, variant = 'full', toolbar = true, editable = true },
   ref
 ): React.JSX.Element | null {
   // Kept in a ref so the editor's keydown handler (built once) always
@@ -358,10 +361,17 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
         return insertImageFiles(view, Array.from(event.dataTransfer?.files ?? []), pos)
       }
     },
+    editable,
     // Note: getText() skips images, so the plain-text mirror callers keep
     // for search/preview simply won't mention them — acceptable.
     onUpdate: ({ editor }) => onChange(editor.getHTML(), editor.getText())
   })
+
+  // Unarchiving flips a mounted editor back to editable in place —
+  // the config above only applies on mount.
+  useEffect(() => {
+    editor?.setEditable(editable)
+  }, [editor, editable])
 
   // Let callers drop the caret into the notes (e.g. ⏎ from the title).
   useImperativeHandle(ref, () => ({ focus: () => editor?.commands.focus('end') }), [editor])
@@ -369,7 +379,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
   if (!editor) return null
   return (
     <div className={`rich-editor ${variant}`}>
-      {toolbar && <Toolbar editor={editor} compact={variant === 'compact'} />}
+      {toolbar && editable && <Toolbar editor={editor} compact={variant === 'compact'} />}
       <EditorContent editor={editor} />
     </div>
   )
