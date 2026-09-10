@@ -15,6 +15,7 @@ import { ConfirmButton } from './ConfirmButton'
 import { LinkChips } from './LinkChips'
 import { extractLinksFromHtml } from '../links'
 import { ProjectPicker } from './ProjectPicker'
+import { SignalPicker } from './SignalPicker'
 import { RichEditor, type RichEditorHandle } from './RichEditor'
 import { itemBodyHtml } from '../richtext'
 import {
@@ -338,6 +339,7 @@ export function ItemCard({
       )}
     <Card
       accentColor={project?.color}
+      signal={done || plainDone ? null : item.signalPriority}
       done={done && !plainDone}
       faded={faded}
       className={[
@@ -492,6 +494,14 @@ export function ItemCard({
               </button>
             )}
             <div className="card-meta">
+              {item.signalPriority !== null && !done && (
+                <span
+                  className={`signal-flag sp${item.signalPriority}`}
+                  title={`Signal ${item.signalPriority} — what happens next`}
+                >
+                  ⚡{item.signalPriority}
+                </span>
+              )}
               {item.starred && <span title="Starred — pinned in the sidebar">⭐</span>}
               {showProject && project && (
                 <span className="pill" title={project.name}>
@@ -711,7 +721,12 @@ export function ItemCard({
                       className="btn ghost small"
                       style={{ padding: '0 2px' }}
                       title="Unblock — remove this dependency"
-                      onClick={() => mutate(() => window.api.deleteLink(b.link.id))}
+                      onClick={() => {
+                        void mutate(() => window.api.deleteLink(b.link.id))
+                        pushUndo(`Unblocked “${shortTitle(item.title)}”`, async () => {
+                          await window.api.linkItems(item.id, b.item.id, 'blocked-by')
+                        })
+                      }}
                     >
                       ✕
                     </button>
@@ -747,14 +762,29 @@ export function ItemCard({
                       className="btn ghost small"
                       style={{ padding: '0 2px' }}
                       title="No longer prep for this meeting"
-                      onClick={() =>
+                      onClick={() => {
+                        const prevDue = item.dueDate
                         // The due date came from this meeting — it goes
                         // with the link (same rule as the context menu).
-                        mutate(async () => {
+                        void mutate(async () => {
                           await window.api.deleteLink(l.id)
                           await window.api.updateItem(item.id, { dueDate: null })
                         })
-                      }
+                        pushUndo(`Unlinked “${shortTitle(item.title)}” from its meeting`, async () => {
+                          await window.api.linkToEvent(
+                            item.id,
+                            {
+                              eventKey: l.toEventKey!,
+                              title: l.eventTitle ?? 'meeting',
+                              date: l.eventDate ?? '',
+                              startTime: null,
+                              endTime: null
+                            },
+                            'prep-for'
+                          )
+                          await window.api.updateItem(item.id, { dueDate: prevDue })
+                        })
+                      }}
                     >
                       ✕
                     </button>
@@ -767,7 +797,13 @@ export function ItemCard({
             <LinkChips
               links={item.links}
               derived={extractLinksFromHtml(item.richContent ?? '')}
-              onSave={(next) => patch({ links: next })}
+              onSave={(next) => {
+                const prev = item.links
+                patch({ links: next })
+                pushUndo(`Changed “${shortTitle(item.title)}”’s links`, async () => {
+                  await window.api.updateItem(item.id, { links: prev })
+                })
+              }}
             />
             <div className="row" style={{ flexWrap: 'wrap' }}>
               <label className="pill">
@@ -955,6 +991,15 @@ export function ItemCard({
                 >
                   ＋ Add subtask
                 </button>
+                {/* Which of the five "what happens next" slots this
+                    task holds, if any — click its slot again to clear. */}
+                <SignalPicker
+                  value={item.signalPriority}
+                  onPick={(p) => {
+                    setMenu(null)
+                    void mutate(() => window.api.setSignal(item.id, p))
+                  }}
+                />
                 {unlinkId ? (
                   // Under a meeting, the useful action is the inverse: cut
                   // the link that put this card here. The due date came
@@ -966,9 +1011,29 @@ export function ItemCard({
                     style={{ justifyContent: 'flex-start' }}
                     onClick={() => {
                       setMenu(null)
+                      const prevDue = item.dueDate
                       void mutate(async () => {
+                        // Snapshot the link before severing it — ⌘Z re-ties
+                        // the same meeting and puts the due date back.
+                        const link = (await window.api.linksFrom(item.id)).find((l) => l.id === unlinkId)
                         await window.api.deleteLink(unlinkId)
                         await window.api.updateItem(item.id, { dueDate: null })
+                        pushUndo(`Removed “${shortTitle(item.title)}” from its meeting`, async () => {
+                          if (link?.toEventKey) {
+                            await window.api.linkToEvent(
+                              item.id,
+                              {
+                                eventKey: link.toEventKey,
+                                title: link.eventTitle ?? 'meeting',
+                                date: link.eventDate ?? '',
+                                startTime: null,
+                                endTime: null
+                              },
+                              link.role
+                            )
+                          }
+                          await window.api.updateItem(item.id, { dueDate: prevDue })
+                        })
                       })
                     }}
                   >
@@ -996,7 +1061,11 @@ export function ItemCard({
                     style={{ justifyContent: 'flex-start' }}
                     onClick={() => {
                       setMenu(null)
+                      const prevDue = item.dueDate
                       patch({ dueDate: null })
+                      pushUndo(`Cleared “${shortTitle(item.title)}”’s due date`, async () => {
+                        await window.api.updateItem(item.id, { dueDate: prevDue })
+                      })
                     }}
                   >
                     ✕ Clear due date
@@ -1016,7 +1085,29 @@ export function ItemCard({
                         return
                       }
                       setMenu(null)
-                      void mutate(() => window.api.removeFromCalendar(item.id))
+                      // Snapshot BEFORE the wipe — the slot fields and every
+                      // linked block — so ⌘Z rebuilds exactly what was there.
+                      const prevSlot = {
+                        scheduledTime: item.scheduledTime,
+                        timeEstimateMinutes: item.timeEstimateMinutes
+                      }
+                      void mutate(async () => {
+                        const blocks = await window.api.localEventsOf(item.id)
+                        await window.api.removeFromCalendar(item.id)
+                        pushUndo(`Took “${shortTitle(item.title)}” off the calendar`, async () => {
+                          await window.api.updateItem(item.id, prevSlot)
+                          for (const b of blocks) {
+                            await window.api.createLocalEvent({
+                              title: b.title,
+                              date: b.date,
+                              startTime: b.startTime,
+                              endTime: b.endTime,
+                              projectId: b.projectId,
+                              itemId: b.itemId
+                            })
+                          }
+                        })
+                      })
                     }}
                   >
                     {removeArmed ? `Remove all ${calInstances} instances?` : '✕ Remove from calendar'}

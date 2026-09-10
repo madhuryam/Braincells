@@ -5,6 +5,8 @@ import { todayYmd } from '@shared/dates'
 import type { Item } from '@shared/types'
 import { useMutate } from '../state/data'
 import { shortTitle, useUndo } from '../state/undo'
+import { ContextMenu } from './ContextMenu'
+import { SignalPicker } from './SignalPicker'
 import { usePendingOrder } from './dnd'
 import { CheckableInput, Checkbox } from './bits'
 
@@ -57,7 +59,8 @@ function SubtaskRow({
   onToggle,
   onDrop,
   onRename,
-  onAddChild
+  onAddChild,
+  onMenu
 }: {
   sub: Item
   depth: number
@@ -72,6 +75,8 @@ function SubtaskRow({
   onDrop: (sub: Item) => void
   onRename: (sub: Item, title: string) => void
   onAddChild: (parentId: string, title: string) => Promise<void>
+  /** Right-click: the row's small menu (signal slots live there). */
+  onMenu: (sub: Item, e: React.MouseEvent) => void
 }): React.JSX.Element {
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
@@ -97,6 +102,7 @@ function SubtaskRow({
           e.stopPropagation()
           listeners?.onPointerDown?.(e)
         }}
+        onContextMenu={(e) => onMenu(sub, e)}
         style={{
           marginLeft: indent,
           transform: CSS.Transform.toString(transform),
@@ -138,6 +144,14 @@ function SubtaskRow({
           >
             {sub.title}
           </button>
+        )}
+        {sub.signalPriority !== null && sub.status !== 'done' && (
+          <span
+            className={`signal-flag sp${sub.signalPriority}`}
+            title={`Signal ${sub.signalPriority} — what happens next`}
+          >
+            ⚡{sub.signalPriority}
+          </span>
         )}
         <button
           className="btn ghost small"
@@ -200,6 +214,9 @@ export function SubtaskTree({
 }): React.JSX.Element | null {
   const mutate = useMutate()
   const { pushUndo } = useUndo()
+  // Right-click on a row: the small menu holding the signal slots —
+  // subtasks can be signals too (the parent then floats, unhighlighted).
+  const [rowMenu, setRowMenu] = useState<{ sub: Item; x: number; y: number } | null>(null)
 
   // While a subtask drag-reorder is persisting, the tree still carries
   // the old DB order (same trap TaskGroups dodges) — re-rank the moved
@@ -292,9 +309,25 @@ export function SubtaskTree({
             onDrop={dropSubtask}
             onRename={(s, title) => mutate(() => window.api.updateItem(s.id, { title }))}
             onAddChild={addChild}
+            onMenu={(s, e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setRowMenu({ sub: s, x: e.clientX, y: e.clientY })
+            }}
           />
         ))}
       </div>
+      {rowMenu && (
+        <ContextMenu x={rowMenu.x} y={rowMenu.y} onClose={() => setRowMenu(null)}>
+          <SignalPicker
+            value={rowMenu.sub.signalPriority}
+            onPick={(p) => {
+              setRowMenu(null)
+              void mutate(() => window.api.setSignal(rowMenu.sub.id, p))
+            }}
+          />
+        </ContextMenu>
+      )}
     </SortableContext>
   )
 }

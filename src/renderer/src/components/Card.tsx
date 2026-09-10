@@ -9,6 +9,9 @@ interface CardProps {
   /** Done cards strike through; faded cards (carried-over) go quiet. */
   done?: boolean
   faded?: boolean
+  /** Signal slot 1–5 — a golden wash whose loudness scales with the
+   *  priority (1 loudest). Overrides the project accent's dress. */
+  signal?: number | null
   onClick?: () => void
   className?: string
 }
@@ -25,12 +28,14 @@ export function Card({
   interactive,
   done,
   faded,
+  signal,
   onClick,
   className = ''
 }: CardProps): React.JSX.Element {
   const classes = [
     'card',
     accentColor ? 'accented' : '',
+    signal ? `signal-p${signal}` : '',
     interactive || onClick ? 'interactive' : '',
     done ? 'done' : '',
     faded ? 'faded' : '',

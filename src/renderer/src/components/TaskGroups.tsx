@@ -4,6 +4,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import type { Item, Project, Section } from '@shared/types'
 import { useData, useLiveQuery, useMutate } from '../state/data'
 import { useFolds } from '../state/folds'
+import { signalsFirst, useSignalRoots } from '../state/signals'
 import { ItemCard } from './ItemCard'
 import { DraggableCard, DropZone, SortableCard, usePendingOrder } from './dnd'
 import { CheckableInput, ProjectDot } from './bits'
@@ -83,6 +84,10 @@ export function TaskGroups({
   // survives navigating away and back — but resets on reload. Keys are
   // scoped by day, so each day folds independently.
   const folds = useFolds()
+  // Signals float: a signaled task — or one whose subtask is a signal —
+  // rises to the top of its subsection, loudest first. Everything else
+  // keeps its manual order below.
+  const signalRoots = useSignalRoots()
   const pgKey = (key: string): string => `pg:${date}:${key}`
   const secKey = (groupKey: string, sectionId: string | null): string =>
     `sec:${date}:${groupKey}:${sectionId ?? 'none'}`
@@ -173,13 +178,19 @@ export function TaskGroups({
         const filled: Array<{ section: Section | null; items: Item[] }> = []
         const empty: Array<{ section: Section | null; items: Item[] }> = []
         for (const s of sections) {
-          const inSection = shown.filter((i) => i.sectionId === s.id)
+          const inSection = signalsFirst(
+            shown.filter((i) => i.sectionId === s.id),
+            signalRoots
+          )
           // An archived section still names the tasks filed in it, but
           // empty it offers nothing — no drop target, no header.
           if (inSection.length > 0) filled.push({ section: s, items: inSection })
           else if (s.status === 'active') empty.push({ section: s, items: inSection })
         }
-        const unfiled = shown.filter((i) => !i.sectionId || !known.has(i.sectionId))
+        const unfiled = signalsFirst(
+          shown.filter((i) => !i.sectionId || !known.has(i.sectionId)),
+          signalRoots
+        )
         const subgroups = [
           ...filled,
           ...(unfiled.length > 0 ? [{ section: null, items: unfiled }] : []),
