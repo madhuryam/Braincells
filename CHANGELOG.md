@@ -6,6 +6,30 @@ hand as part of cutting a release — the process lives in
 shipped without git tags; their tags were added retroactively, dated
 to their version commits.
 
+## v1.3.0 — 2026-09-12
+
+- **Signals are per day.** Slots 1–5 are keyed by the task's scheduled
+  day, so lining up tomorrow's signals never touches today's. Claiming
+  an occupied slot bumps its holder down one instead of evicting it
+  (with all five taken, old 5 drops back to a plain task). When
+  unfinished signals carry into a day whose slots are already spoken
+  for, nothing auto-shuffles — a reconcile prompt lists the merged
+  pool and you pick, in order, what keeps today's five; the rest
+  demote. Finishing (or dropping) a signal promotes the quieter ones
+  up: finish ⚡1 and ⚡2 is the new ⚡1.
+- **Check and uncheck are undoable.** Everywhere — card, subtask row,
+  task peek, done log. Undoing an accidental uncheck re-completes on
+  the original timestamp, so old completions return to the right day
+  in the log.
+- **Reschedule from the right-click menu.** "↷ move to" offers the
+  rolling window and upcoming weeks (landing on their Monday) without
+  opening the editor. The menu and the task peek also show a quiet
+  "created …" provenance line.
+- **Dropped tasks take their time blocks with them.** Deleting a task
+  from its block's peek used to leave the block on the timeline;
+  linked blocks now hide with the dropped task (and come back if the
+  drop is undone).
+
 ## v1.2.0 — 2026-09-09
 
 - **Ad-hoc meetings on a second calendar.** Settings names the
