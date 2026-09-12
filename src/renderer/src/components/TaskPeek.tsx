@@ -12,7 +12,7 @@ import { LinkChips } from './LinkChips'
 import { extractLinksFromHtml } from '../links'
 import { ItemNotes } from './ItemNotes'
 import { NotesSection } from './NotesSection'
-import { ampm, durationLabel } from '../format'
+import { ampm, createdLabel, durationLabel } from '../format'
 
 const DURATIONS = [5, 10, 15, 30, 45, 60, 90, 120] // minutes
 // Non-preset lengths (a custom end time) read plainly in minutes.
@@ -370,6 +370,11 @@ export function TaskPeek({
       <NotesSection fill>
         <ItemNotes item={item} variant="full" toolbar />
       </NotesSection>
+
+      {/* Quiet provenance — when this task entered the system. */}
+      <div style={{ fontSize: 11.5, color: 'var(--text-faint)', textAlign: 'right' }}>
+        {createdLabel(item.createdAt)}
+      </div>
     </div>
   )
 }

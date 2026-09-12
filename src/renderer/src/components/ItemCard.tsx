@@ -19,6 +19,7 @@ import { SignalPicker } from './SignalPicker'
 import { RichEditor, type RichEditorHandle } from './RichEditor'
 import { itemBodyHtml } from '../richtext'
 import {
+  createdLabel,
   durationLabel,
   KIND_ICON,
   mmdd,
@@ -174,6 +175,20 @@ export function ItemCard({
     patch({ status: 'dropped' })
     pushUndo(`Dropped “${shortTitle(item.title)}”`, async () => {
       await window.api.updateItem(item.id, { status: prev })
+    })
+  }
+  // The context menu's "move to": same day change as dragging the card
+  // onto a day (inbox items graduate to active), same undo.
+  const moveTo = (d: string): void => {
+    const prev = { scheduledDate: item.scheduledDate, status: item.status }
+    void mutate(() =>
+      window.api.updateItem(item.id, {
+        scheduledDate: d,
+        ...(item.status === 'inbox' ? { status: 'active' as ItemStatus } : {})
+      })
+    )
+    pushUndo(`Moved “${shortTitle(item.title)}” to ${prettyDate(d)}`, async () => {
+      await window.api.updateItem(item.id, prev)
     })
   }
 
@@ -1010,6 +1025,45 @@ export function ItemCard({
                     void mutate(() => window.api.setSignal(item.id, p))
                   }}
                 />
+                {/* Reschedule without opening the editor: the same
+                    vocabulary as its scheduling row — the rolling
+                    window, then whole weeks (their Monday). */}
+                <div
+                  className="row"
+                  style={{ flexWrap: 'wrap', gap: 3, padding: '2px 4px', maxWidth: 250 }}
+                >
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-faint)' }}>
+                    ↷ move to
+                  </span>
+                  {rollingDays().map((d) => (
+                    <button
+                      key={d.date}
+                      className={`btn small ${item.scheduledDate === d.date ? 'primary' : 'ghost'}`}
+                      style={{ flexShrink: 0 }}
+                      title={d.label}
+                      onClick={() => {
+                        setMenu(null)
+                        if (item.scheduledDate !== d.date) moveTo(d.date)
+                      }}
+                    >
+                      {d.chip}
+                    </button>
+                  ))}
+                  {upcomingWeeks().map((w) => (
+                    <button
+                      key={w.start}
+                      className="btn small ghost"
+                      style={{ flexShrink: 0 }}
+                      title={`${w.label} — lands on that Monday`}
+                      onClick={() => {
+                        setMenu(null)
+                        if (item.scheduledDate !== w.start) moveTo(w.start)
+                      }}
+                    >
+                      {w.chip}
+                    </button>
+                  ))}
+                </div>
                 {unlinkId ? (
                   // Under a meeting, the useful action is the inverse: cut
                   // the link that put this card here. The due date came
@@ -1142,6 +1196,10 @@ export function ItemCard({
                 >
                   {dropArmed ? '🗑 Confirm Delete' : '🗑 Delete'}
                 </button>
+                {/* Quiet provenance — when this task entered the system. */}
+                <span style={{ padding: '3px 8px 1px', fontSize: 11.5, color: 'var(--text-faint)' }}>
+                  {createdLabel(item.createdAt)}
+                </span>
               </>
             )}
           </div>

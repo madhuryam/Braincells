@@ -124,6 +124,22 @@ export function ampm(time: string): string {
   return m ? `${hour}:${String(m).padStart(2, '0')} ${suffix}` : `${hour} ${suffix}`
 }
 
+/**
+ * 'created Sep 8 · 2:14 PM' (year added once it isn't this year's) —
+ * the quiet provenance line on a task's peek and right-click menu.
+ */
+export function createdLabel(createdAt: string): string {
+  const [date, time] = createdAt.split(' ')
+  const [y, m, d] = date.split('-').map(Number)
+  const sameYear = y === new Date().getFullYear()
+  const day = new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' })
+  })
+  return `created ${day}${time ? ` · ${ampm(time.slice(0, 5))}` : ''}`
+}
+
 /** '45m', '1h', '1h 15m' — totals of time blocked on the calendar. */
 export function durationLabel(mins: number): string {
   const h = Math.floor(mins / 60)
