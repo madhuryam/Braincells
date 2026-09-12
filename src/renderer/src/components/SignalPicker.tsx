@@ -1,8 +1,9 @@
 /**
  * The five signal slots as one row: pick where this task ranks among
  * "what happens next" (1 is loudest). Picking the slot it already
- * holds clears it; a slot held by another task is quietly taken over
- * — that hand-off is also what keeps signals capped at five.
+ * holds clears it; claiming an occupied slot bumps its holder down
+ * one (and so on down the line — a full house drops old 5 back to a
+ * regular task). Slots are per day, keyed by the task's scheduled day.
  */
 export function SignalPicker({
   value,
@@ -21,7 +22,7 @@ export function SignalPicker({
           title={
             value === p
               ? 'Clear this signal'
-              : `Signal priority ${p}${p === 1 ? ' — loudest' : ''}; takes the slot from whoever holds it`
+              : `Signal priority ${p}${p === 1 ? ' — loudest' : ''}; whoever holds it bumps down one`
           }
           onClick={() => onPick(value === p ? null : p)}
         >

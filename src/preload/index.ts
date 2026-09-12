@@ -97,6 +97,10 @@ const api = {
   setSignal: (itemId: string, priority: number | null): Promise<void> =>
     invoke('items:setSignal', itemId, priority),
   signalItems: (): Promise<Item[]> => invoke('items:signals'),
+  /** Today's signal pool — with duplicate slots right after a carryover conflict. */
+  signalPool: (): Promise<Item[]> => invoke('items:signalPool'),
+  /** keepIds (in order) become signals 1…5; the rest of today's pool demotes. */
+  resolveSignals: (keepIds: string[]): Promise<void> => invoke('items:resolveSignals', keepIds),
   tasksFor: (date: string): Promise<Item[]> => invoke('today:tasks', date),
   scheduledBlocks: (date: string): Promise<Item[]> => invoke('today:blocks', date),
   tasksBetween: (start: string, end: string): Promise<Item[]> => invoke('today:between', start, end),

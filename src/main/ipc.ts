@@ -57,6 +57,8 @@ export function registerStoreIpc(store: Store): void {
     store.setSignal(itemId, priority)
   )
   ipcMain.handle('items:signals', () => store.signalItems())
+  ipcMain.handle('items:signalPool', () => store.signalPool())
+  ipcMain.handle('items:resolveSignals', (_e, keepIds: string[]) => store.resolveSignals(keepIds))
   ipcMain.handle('today:tasks', (_e, date: string) => store.tasksFor(date))
   ipcMain.handle('today:blocks', (_e, date: string) => store.scheduledBlocks(date))
   ipcMain.handle('today:between', (_e, start: string, end: string) =>

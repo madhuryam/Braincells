@@ -307,9 +307,9 @@ const MIGRATIONS: string[] = [
   `,
 
   // 17: signals — the ≤5 tasks that are "what happens next", each
-  // wearing a priority slot 1–5 (1 loudest). One task per slot;
-  // setSignal() enforces that, which is also what caps signals at
-  // five. NULL = not a signal.
+  // wearing a priority slot 1–5 (1 loudest). One task per slot per
+  // day; setSignal() enforces that, which is also what caps a day's
+  // signals at five. NULL = not a signal.
   `
   ALTER TABLE items ADD COLUMN signal_priority INTEGER;
   `,

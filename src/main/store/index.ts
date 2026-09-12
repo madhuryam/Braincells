@@ -399,11 +399,13 @@ export class Store {
     }
     // A finished (or dropped) task is no longer "what happens next" —
     // its signal clears with it, freeing the slot.
-    if (
+    const freedSignal =
       (patch.status === 'done' || patch.status === 'dropped') &&
       patch.status !== existing.status &&
       existing.signalPriority !== null
-    ) {
+        ? existing.signalPriority
+        : null
+    if (freedSignal !== null) {
       sets.push('signal_priority = NULL')
     }
     // Intake triage: giving an inbox item a day or a project IS the
@@ -432,6 +434,19 @@ export class Store {
       sets.push('updated_at = ?')
       vals.push(nowStamp())
       this.db.prepare(`UPDATE items SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id)
+    }
+    // The freed slot doesn't sit empty: everything quieter in the same
+    // day's pool steps up one — finish ⚡1 and ⚡2 is the new ⚡1.
+    if (freedSignal !== null) {
+      const today = todayYmd()
+      const day = this.signalDayOf(existing, today)
+      for (const p of this.signalItems()) {
+        if (p.signalPriority! > freedSignal && this.signalDayOf(p, today) === day) {
+          this.db
+            .prepare('UPDATE items SET signal_priority = signal_priority - 1 WHERE id = ?')
+            .run(p.id)
+        }
+      }
     }
     // A subtask belongs to its parent's project — refiling a task takes
     // its whole subtask tree along, so a time-blocked subtask on the
@@ -575,7 +590,7 @@ export class Store {
           itemId: t.id
         })
       }
-      return this.db
+      const moved = this.db
         .prepare(
           `UPDATE items SET scheduled_date = ?,
              time_estimate_minutes = CASE WHEN scheduled_time IS NOT NULL
@@ -584,6 +599,17 @@ export class Store {
            WHERE kind = 'task' AND status = 'active' AND scheduled_date < ?`
         )
         .run(today, today).changes
+      // Carried signals keep their slots, so today's pool may now hold
+      // two ⚡3s (or six items) — that collision is the user's call, not
+      // an auto-shuffle: raise the flag the reconcile prompt watches.
+      // The pool state itself is the test, not "did THIS call move a
+      // signal" — so a merge done behind our back (an old build moved
+      // the items first) still gets flagged at the next rollover tick.
+      const slots = this.signalPool(today).map((i) => i.signalPriority)
+      if (new Set(slots).size < slots.length || slots.length > 5) {
+        this.setSetting('signalConflict', today)
+      }
+      return moved
     })()
   }
 
@@ -1315,21 +1341,60 @@ export class Store {
   }
 
   /**
-   * Signals: mark a task (or subtask) as "what happens next", in one
-   * of five priority slots — 1 is the loudest. A slot holds ONE item:
-   * claiming it quietly clears the previous holder, which is also
-   * what caps signals at five. null clears the item's signal.
+   * Which day's signal pool an item competes in: its own scheduled
+   * day, else its outermost ancestor's (a signaled subtask rides with
+   * its task), else today. Past days collapse to today — carryover
+   * moves that work onto today anyway.
    */
-  setSignal(itemId: string, priority: number | null): void {
+  private signalDayOf(item: Item, today: string): string {
+    const day = item.scheduledDate ?? this.ancestorsOf(item.id)[0]?.scheduledDate ?? today
+    return day < today ? today : day
+  }
+
+  /**
+   * Signals: mark a task (or subtask) as "what happens next", in one
+   * of five priority slots — 1 is the loudest. Slots are PER DAY (the
+   * item's scheduled day), so lining up tomorrow's signals never
+   * touches today's. Claiming an occupied slot doesn't evict its
+   * holder — it bumps it down one (1→2, 2→3 …) until the first free
+   * slot; when all five below are taken, the quietest (5) drops back
+   * to a regular task. null clears the item's signal.
+   */
+  setSignal(itemId: string, priority: number | null, today = todayYmd()): void {
     this.db.transaction(() => {
-      if (priority !== null) {
+      const stamp = nowStamp()
+      const setSlot = (id: string, p: number | null): void => {
         this.db
-          .prepare('UPDATE items SET signal_priority = NULL WHERE signal_priority = ?')
-          .run(priority)
+          .prepare('UPDATE items SET signal_priority = ?, updated_at = ? WHERE id = ?')
+          .run(p, stamp, id)
       }
-      this.db
-        .prepare('UPDATE items SET signal_priority = ?, updated_at = ? WHERE id = ?')
-        .run(priority, nowStamp(), itemId)
+      const item = this.getItem(itemId)
+      if (!item) return
+      if (priority === null) {
+        setSlot(itemId, null)
+        return
+      }
+      const day = this.signalDayOf(item, today)
+      // Who holds which slot in this day's pool (the item itself
+      // vacates its old slot by moving, so it isn't a peer).
+      const bySlot = new Map<number, string>()
+      for (const p of this.signalItems()) {
+        if (p.id !== itemId && this.signalDayOf(p, today) === day) {
+          bySlot.set(p.signalPriority!, p.id)
+        }
+      }
+      // The bump chain ends at the first free slot at or below the
+      // claimed one; with 5 occupied all the way down, 5 drops off.
+      let free = priority
+      while (free <= 5 && bySlot.has(free)) free++
+      if (free > 5) {
+        setSlot(bySlot.get(5)!, null)
+        free = 5
+      }
+      for (let s = free - 1; s >= priority; s--) {
+        setSlot(bySlot.get(s)!, s + 1)
+      }
+      setSlot(itemId, priority)
     })()
   }
 
@@ -1343,6 +1408,40 @@ export class Store {
       )
       .all()
       .map(rowToItem)
+  }
+
+  /**
+   * Today's signal pool: every live signaled item competing for
+   * today's five slots — including duplicate slot-holders right after
+   * a carryover, which is exactly what the reconcile prompt lists.
+   */
+  signalPool(today = todayYmd()): Item[] {
+    return this.signalItems().filter((i) => this.signalDayOf(i, today) === today)
+  }
+
+  /**
+   * The reconcile prompt's answer: `keepIds` (in order) become signals
+   * 1…5, everything else in today's pool goes back to a regular task,
+   * and the carryover conflict flag clears.
+   */
+  resolveSignals(keepIds: string[], today = todayYmd()): void {
+    this.db.transaction(() => {
+      const stamp = nowStamp()
+      const keep = keepIds.slice(0, 5)
+      for (const item of this.signalPool(today)) {
+        if (!keep.includes(item.id)) {
+          this.db
+            .prepare('UPDATE items SET signal_priority = NULL, updated_at = ? WHERE id = ?')
+            .run(stamp, item.id)
+        }
+      }
+      keep.forEach((id, i) => {
+        this.db
+          .prepare('UPDATE items SET signal_priority = ?, updated_at = ? WHERE id = ?')
+          .run(i + 1, stamp, id)
+      })
+      this.setSetting('signalConflict', null)
+    })()
   }
 
   /** Take a task off the calendar entirely: slot and linked blocks. */

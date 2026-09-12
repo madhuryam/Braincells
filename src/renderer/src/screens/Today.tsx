@@ -10,6 +10,7 @@ import { ContextMenu } from '../components/ContextMenu'
 import { DetailPanel } from '../components/DetailPanel'
 import { DoneList } from '../components/DoneList'
 import { MiniCalendar } from '../components/MiniCalendar'
+import { SignalReconcile } from '../components/SignalReconcile'
 import { TaskPeek } from '../components/TaskPeek'
 import { AdHocDeleteButton, Meeting } from './Meeting'
 import { ItemCard } from '../components/ItemCard'
@@ -86,6 +87,12 @@ export function Today(): React.JSX.Element {
   // card in view). Session-only, like the folds.
   const [signalsOnly, setSignalsOnly] = useState(false)
   const signalRoots = useSignalRoots()
+  // Carryover collision: an unfinished signal rode into today and its
+  // slot is contested. The rollover only raises the flag — the modal
+  // asks the user which tasks keep today's five slots. Dismissing
+  // parks it for this session; the flag stays until it's resolved.
+  const signalConflict = useLiveQuery(() => window.api.getSetting<string>('signalConflict'), [])
+  const [conflictParked, setConflictParked] = useState(false)
   // The header's collapse-all/expand-all for the day's project blocks;
   // each click broadcasts (seq bump), then blocks toggle freely again.
   const [fold, setFold] = useState({ seq: 0, collapsed: false })
@@ -192,6 +199,10 @@ export function Today(): React.JSX.Element {
             }}
           />
         </ContextMenu>
+      )}
+
+      {signalConflict === today && !conflictParked && (
+        <SignalReconcile onClose={() => setConflictParked(true)} />
       )}
 
       {/* Cards deep in the lists can peek a linked meeting here beside

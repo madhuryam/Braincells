@@ -120,39 +120,240 @@ describe('canvas archive', () => {
 })
 
 describe('signals (priority slots 1–5)', () => {
-  it('one item per slot: claiming a slot clears the previous holder', () => {
-    const a = store.createItem({ kind: 'task', title: 'a', status: 'active' })
-    const b = store.createItem({ kind: 'task', title: 'b', status: 'active' })
+  const task = (title: string, date: string | null = today): ReturnType<typeof store.createItem> =>
+    store.createItem({ kind: 'task', title, status: 'active', scheduledDate: date })
+  const slot = (id: string): number | null => store.getItem(id)?.signalPriority ?? null
+
+  it('claiming an occupied slot bumps the chain down instead of evicting', () => {
+    const a = task('a')
+    const b = task('b')
+    const c = task('c')
     store.setSignal(a.id, 1)
-    store.setSignal(b.id, 1)
-    expect(store.getItem(a.id)?.signalPriority).toBeNull()
-    expect(store.getItem(b.id)?.signalPriority).toBe(1)
-    // Five slots means never more than five signals, whatever happens.
-    const extras = [2, 3, 4, 5].map((p) => {
-      const t = store.createItem({ kind: 'task', title: `p${p}`, status: 'active' })
+    store.setSignal(b.id, 1) // a slides to 2
+    expect(slot(b.id)).toBe(1)
+    expect(slot(a.id)).toBe(2)
+    store.setSignal(c.id, 1) // b→2, a→3
+    expect(slot(c.id)).toBe(1)
+    expect(slot(b.id)).toBe(2)
+    expect(slot(a.id)).toBe(3)
+  })
+
+  it('the bump chain stops at the first gap', () => {
+    const [a, b, c, d] = ['a', 'b', 'c', 'd'].map((t) => task(t))
+    store.setSignal(a.id, 1)
+    store.setSignal(b.id, 2)
+    store.setSignal(c.id, 4)
+    store.setSignal(d.id, 1) // a→2, b→3; c keeps 4 (3 was free)
+    expect(slot(d.id)).toBe(1)
+    expect(slot(a.id)).toBe(2)
+    expect(slot(b.id)).toBe(3)
+    expect(slot(c.id)).toBe(4)
+  })
+
+  it('with all five taken, the quietest signal drops back to a plain task', () => {
+    const tasks = [1, 2, 3, 4, 5].map((p) => {
+      const t = task(`p${p}`)
       store.setSignal(t.id, p)
       return t
     })
-    store.setSignal(a.id, 3) // steals slot 3
+    const n = task('new')
+    store.setSignal(n.id, 1)
+    expect(slot(n.id)).toBe(1)
+    expect(slot(tasks[0].id)).toBe(2)
+    expect(slot(tasks[3].id)).toBe(5)
+    expect(slot(tasks[4].id)).toBeNull() // old 5 dropped off
     expect(store.signalItems()).toHaveLength(5)
-    expect(store.getItem(extras[1].id)?.signalPriority).toBeNull()
-    // Loudest first.
-    expect(store.signalItems()[0].signalPriority).toBe(1)
+  })
+
+  it('re-ranking a signal vacates its old slot for the chain to fill', () => {
+    const [a, b, c] = ['a', 'b', 'c'].map((t) => task(t))
+    store.setSignal(a.id, 1)
+    store.setSignal(b.id, 2)
+    store.setSignal(c.id, 3)
+    store.setSignal(c.id, 1) // a→2, b→3 fills c's vacated slot
+    expect(slot(c.id)).toBe(1)
+    expect(slot(a.id)).toBe(2)
+    expect(slot(b.id)).toBe(3)
+  })
+
+  it("slots are per day: tomorrow's signals never touch today's", () => {
+    const tdy = task('today task')
+    const tmw = task('tomorrow task', ymdAddDays(today, 1))
+    store.setSignal(tdy.id, 1)
+    store.setSignal(tmw.id, 1)
+    expect(slot(tdy.id)).toBe(1)
+    expect(slot(tmw.id)).toBe(1)
+    expect(store.signalPool(today).map((i) => i.id)).toEqual([tdy.id])
+  })
+
+  it("a signaled subtask competes in its parent's day, not today's", () => {
+    const parent = task('parent', ymdAddDays(today, 1))
+    const sub = store.createItem({ kind: 'task', title: 'sub', status: 'active' })
+    store.linkItems(sub.id, parent.id, 'subtask-of')
+    const tdy = task('today task')
+    store.setSignal(tdy.id, 1)
+    store.setSignal(sub.id, 1)
+    expect(slot(tdy.id)).toBe(1) // untouched — different pools
+    expect(slot(sub.id)).toBe(1)
   })
 
   it('clears on null, and automatically when the task finishes or drops', () => {
-    const t = store.createItem({ kind: 'task', title: 't', status: 'active' })
+    const t = task('t')
     store.setSignal(t.id, 2)
     store.setSignal(t.id, null)
-    expect(store.getItem(t.id)?.signalPriority).toBeNull()
+    expect(slot(t.id)).toBeNull()
 
     store.setSignal(t.id, 2)
     store.updateItem(t.id, { status: 'done' })
-    expect(store.getItem(t.id)?.signalPriority).toBeNull() // slot freed
+    expect(slot(t.id)).toBeNull() // slot freed
     store.updateItem(t.id, { status: 'active' })
     store.setSignal(t.id, 2)
     store.updateItem(t.id, { status: 'dropped' })
     expect(store.signalItems()).toHaveLength(0)
+  })
+
+  it('finishing a signal promotes the quieter ones up: ⚡2 becomes the new ⚡1', () => {
+    const [a, b, c] = ['a', 'b', 'c'].map((t) => task(t))
+    store.setSignal(a.id, 1)
+    store.setSignal(b.id, 2)
+    store.setSignal(c.id, 3)
+
+    store.updateItem(a.id, { status: 'done' })
+    expect(slot(b.id)).toBe(1)
+    expect(slot(c.id)).toBe(2)
+
+    // Mid-pool works too: louder slots stay put, quieter step up.
+    const d = task('d')
+    store.setSignal(d.id, 3)
+    store.updateItem(c.id, { status: 'dropped' }) // c held 2
+    expect(slot(b.id)).toBe(1)
+    expect(slot(d.id)).toBe(2)
+  })
+
+  it("promotion stays in its day: finishing today's ⚡1 leaves tomorrow's pool alone", () => {
+    const tdy1 = task('today 1')
+    const tdy2 = task('today 2')
+    const tmw = task('tomorrow', ymdAddDays(today, 1))
+    store.setSignal(tdy1.id, 1)
+    store.setSignal(tdy2.id, 2)
+    store.setSignal(tmw.id, 2)
+
+    store.updateItem(tdy1.id, { status: 'done' })
+    expect(slot(tdy2.id)).toBe(1)
+    expect(slot(tmw.id)).toBe(2) // untouched — different pool
+  })
+})
+
+describe('signal carryover conflicts', () => {
+  // The scenario: today has its signals, tomorrow's are lined up in
+  // advance, then the day rolls over with today's work unfinished.
+  const tomorrow = ymdAddDays(today, 1)
+
+  it('a carried signal colliding with a set slot raises the conflict flag, not a shuffle', () => {
+    const old = store.createItem({
+      kind: 'task',
+      title: 'unfinished',
+      status: 'active',
+      scheduledDate: today
+    })
+    store.setSignal(old.id, 1)
+    const fresh = store.createItem({
+      kind: 'task',
+      title: 'planned',
+      status: 'active',
+      scheduledDate: tomorrow
+    })
+    store.setSignal(fresh.id, 1)
+
+    store.carryOver(tomorrow)
+    // Neither signal moved — both hold slot 1 until the user decides.
+    expect(store.getItem(old.id)?.signalPriority).toBe(1)
+    expect(store.getItem(fresh.id)?.signalPriority).toBe(1)
+    expect(store.getSetting('signalConflict')).toBe(tomorrow)
+    expect(store.signalPool(tomorrow)).toHaveLength(2)
+
+    // The prompt's answer: fresh keeps 1, old demotes to a plain task.
+    store.resolveSignals([fresh.id], tomorrow)
+    expect(store.getItem(fresh.id)?.signalPriority).toBe(1)
+    expect(store.getItem(old.id)?.signalPriority).toBeNull()
+    expect(store.getSetting('signalConflict')).toBeNull()
+  })
+
+  it('a carried signal landing in a free slot raises no flag', () => {
+    const old = store.createItem({
+      kind: 'task',
+      title: 'unfinished',
+      status: 'active',
+      scheduledDate: today
+    })
+    store.setSignal(old.id, 1)
+    const fresh = store.createItem({
+      kind: 'task',
+      title: 'planned',
+      status: 'active',
+      scheduledDate: tomorrow
+    })
+    store.setSignal(fresh.id, 2)
+
+    store.carryOver(tomorrow)
+    expect(store.getItem(old.id)?.signalPriority).toBe(1)
+    expect(store.getItem(fresh.id)?.signalPriority).toBe(2)
+    expect(store.getSetting('signalConflict')).toBeNull()
+  })
+
+  it('rollover with a clean pool never flags', () => {
+    store.createItem({ kind: 'task', title: 'plain', status: 'active', scheduledDate: today })
+    const fresh = store.createItem({
+      kind: 'task',
+      title: 'planned',
+      status: 'active',
+      scheduledDate: tomorrow
+    })
+    store.setSignal(fresh.id, 1)
+    store.carryOver(tomorrow)
+    expect(store.getSetting('signalConflict')).toBeNull()
+  })
+
+  it('a collision merged behind our back is still flagged at the next rollover tick', () => {
+    // The half-upgrade hole: an old build (no per-day slots) performs
+    // the carryover, merging two days' pools without raising the flag.
+    // The next carryOver moves nothing — but must flag the mess anyway.
+    const old = store.createItem({
+      kind: 'task',
+      title: 'unfinished',
+      status: 'active',
+      scheduledDate: today
+    })
+    store.setSignal(old.id, 1)
+    const fresh = store.createItem({
+      kind: 'task',
+      title: 'planned',
+      status: 'active',
+      scheduledDate: tomorrow
+    })
+    store.setSignal(fresh.id, 1)
+    store.carryOver(tomorrow)
+    store.setSetting('signalConflict', null) // the old build never set it
+
+    expect(store.carryOver(tomorrow)).toBe(0) // nothing left to move…
+    expect(store.getSetting('signalConflict')).toBe(tomorrow) // …still flagged
+  })
+
+  it('resolveSignals ranks the kept ids 1…n and demotes the rest of the pool', () => {
+    const tasks = [1, 2, 3].map((p) => {
+      const t = store.createItem({
+        kind: 'task',
+        title: `t${p}`,
+        status: 'active',
+        scheduledDate: today
+      })
+      store.setSignal(t.id, p)
+      return t
+    })
+    store.resolveSignals([tasks[2].id, tasks[0].id])
+    expect(store.getItem(tasks[2].id)?.signalPriority).toBe(1)
+    expect(store.getItem(tasks[0].id)?.signalPriority).toBe(2)
+    expect(store.getItem(tasks[1].id)?.signalPriority).toBeNull()
   })
 })
 
