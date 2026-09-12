@@ -1088,6 +1088,22 @@ describe('local time blocks', () => {
     store.deleteItem(task.id)
     expect(store.localEventsFor(today)).toHaveLength(0)
   })
+
+  it("a dropped task's blocks hide from the day — and come back on undo", () => {
+    const task = store.createItem({ kind: 'task', title: 'deep work', status: 'active' })
+    store.createLocalEvent({
+      title: 'deep work', date: today, startTime: '09:00', endTime: '09:30', itemId: task.id
+    })
+
+    // Deleting from the block's peek soft-drops the task: its block
+    // must vanish with it, or the delete looks like it did nothing.
+    store.updateItem(task.id, { status: 'dropped' })
+    expect(store.localEventsFor(today)).toHaveLength(0)
+
+    // Hidden, not deleted — undoing the drop restores the block.
+    store.updateItem(task.id, { status: 'active' })
+    expect(store.localEventsFor(today)).toHaveLength(1)
+  })
 })
 
 describe('project deletion', () => {

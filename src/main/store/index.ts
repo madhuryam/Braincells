@@ -1459,11 +1459,18 @@ export class Store {
   }
 
   localEventsFor(date: string): LocalEvent[] {
+    // A dropped task's linked blocks hide with it — otherwise deleting
+    // a task from its block's peek looks like a no-op (the block stays,
+    // and clicking it peeks the same "deleted" task). Hidden, not
+    // deleted: undoing the drop brings them straight back.
     return this.db
       .prepare(
-        `SELECT id, title, date, start_time AS startTime, end_time AS endTime,
-                project_id AS projectId, item_id AS itemId
-         FROM local_events WHERE date = ? ORDER BY start_time`
+        `SELECT le.id, le.title, le.date, le.start_time AS startTime,
+                le.end_time AS endTime, le.project_id AS projectId, le.item_id AS itemId
+         FROM local_events le
+         LEFT JOIN items i ON i.id = le.item_id
+         WHERE le.date = ? AND (le.item_id IS NULL OR i.status != 'dropped')
+         ORDER BY le.start_time`
       )
       .all(date) as LocalEvent[]
   }
