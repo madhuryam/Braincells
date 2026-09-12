@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import type { Item, Project, Section } from '@shared/types'
 import { useData, useLiveQuery, useMutate } from '../state/data'
+import { shortTitle, useUndo } from '../state/undo'
 import { Card } from './Card'
 import { ItemCard } from './ItemCard'
 import { Checkbox, ProjectDot } from './bits'
@@ -331,6 +332,7 @@ function DoneSubtaskGroup({
 }): React.JSX.Element {
   const tree = useLiveQuery(() => window.api.subtaskTreeOf(rootId), [rootId]) ?? []
   const mutate = useMutate()
+  const { pushUndo } = useUndo()
 
   const dateSet = new Set(dates)
   const shown = tree.filter(
@@ -363,7 +365,17 @@ function DoneSubtaskGroup({
           <div key={sub.id} className="subtask-row" style={{ marginLeft: (depthOf(sub.id) - 1) * 22 }}>
             <Checkbox
               checked
-              onToggle={() => mutate(() => window.api.updateItem(sub.id, { status: 'active' }))}
+              onToggle={() => {
+                const prevDoneAt = sub.completedAt
+                void mutate(() => window.api.updateItem(sub.id, { status: 'active' }))
+                // Re-completes on the ORIGINAL stamp, keeping the log's history.
+                pushUndo(`Reopened “${shortTitle(sub.title)}”`, async () => {
+                  await window.api.updateItem(sub.id, {
+                    status: 'done',
+                    completedAt: prevDoneAt ?? undefined
+                  })
+                })
+              }}
             />
             <span className={`subtask-title${plain ? '' : ' done'}`}>{sub.title}</span>
           </div>

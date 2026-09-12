@@ -418,6 +418,7 @@ export function ItemCard({
               checked={done}
               onToggle={() => {
                 const prev = item.status
+                const prevDoneAt = item.completedAt
                 // Checking off while viewing a past day records the
                 // completion on THAT day — you're logging what already
                 // happened, not doing it now. (Future days stamp now:
@@ -430,6 +431,15 @@ export function ItemCard({
                 if (!done) {
                   pushUndo(`Completed “${shortTitle(item.title)}”`, async () => {
                     await window.api.updateItem(item.id, { status: prev })
+                  })
+                } else {
+                  // Undoing an uncheck re-completes on the ORIGINAL
+                  // stamp — not "now" — so the log keeps its history.
+                  pushUndo(`Reopened “${shortTitle(item.title)}”`, async () => {
+                    await window.api.updateItem(item.id, {
+                      status: 'done',
+                      completedAt: prevDoneAt ?? undefined
+                    })
                   })
                 }
               }}

@@ -268,6 +268,7 @@ export function SubtaskTree({
   }
   const toggleSubtask = (sub: Item): void => {
     const wasDone = sub.status === 'done'
+    const prevDoneAt = sub.completedAt
     // Past-day views backdate, same as the card's own checkbox.
     const backdate = !wasDone && contextDate && contextDate < todayYmd()
     void mutate(() =>
@@ -279,6 +280,14 @@ export function SubtaskTree({
     if (!wasDone) {
       pushUndo(`Completed “${shortTitle(sub.title)}”`, async () => {
         await window.api.updateItem(sub.id, { status: 'active' })
+      })
+    } else {
+      // Re-completes on the ORIGINAL stamp, keeping the log's history.
+      pushUndo(`Reopened “${shortTitle(sub.title)}”`, async () => {
+        await window.api.updateItem(sub.id, {
+          status: 'done',
+          completedAt: prevDoneAt ?? undefined
+        })
       })
     }
   }

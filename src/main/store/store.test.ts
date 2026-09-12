@@ -490,6 +490,17 @@ describe('item lifecycle', () => {
     const untouched = store.updateItem(item.id, { completedAt: yesterday })!
     expect(untouched.completedAt).toBeNull()
   })
+
+  it('re-completing with a full timestamp keeps it exactly (undo of an uncheck)', () => {
+    const item = store.createItem({ kind: 'task', title: 't', status: 'active' })
+    const stamp = store.updateItem(item.id, { status: 'done' })!.completedAt!
+
+    // Unchecked by mistake, then ⌘Z: the completion returns on its
+    // ORIGINAL stamp, not re-stamped "now".
+    store.updateItem(item.id, { status: 'active' })
+    const redone = store.updateItem(item.id, { status: 'done', completedAt: stamp })!
+    expect(redone.completedAt).toBe(stamp)
+  })
 })
 
 describe('blocked tasks', () => {

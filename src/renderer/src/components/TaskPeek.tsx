@@ -171,7 +171,27 @@ export function TaskPeek({
   return (
     <div className="stack task-peek">
       <div className="row">
-        <Checkbox checked={done} onToggle={() => patch({ status: done ? 'active' : 'done' })} />
+        <Checkbox
+          checked={done}
+          onToggle={() => {
+            const prev = item.status
+            const prevDoneAt = item.completedAt
+            void patch({ status: done ? 'active' : 'done' })
+            if (!done) {
+              pushUndo(`Completed “${shortTitle(item.title)}”`, async () => {
+                await window.api.updateItem(item.id, { status: prev })
+              })
+            } else {
+              // Re-completes on the ORIGINAL stamp, keeping the log's history.
+              pushUndo(`Reopened “${shortTitle(item.title)}”`, async () => {
+                await window.api.updateItem(item.id, {
+                  status: 'done',
+                  completedAt: prevDoneAt ?? undefined
+                })
+              })
+            }
+          }}
+        />
         <input
           className="peek-title"
           style={{ textDecoration: done ? 'line-through' : undefined }}
